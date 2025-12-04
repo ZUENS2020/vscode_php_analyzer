@@ -121,9 +121,150 @@ export interface GraphEdge {
     target: string;
     type: 'contains' | 'calls' | 'extends' | 'implements' | 'dataflow';
     label?: string;
+    metadata?: any;
 }
 
 export interface CodeGraph {
     nodes: GraphNode[];
     edges: GraphEdge[];
+}
+
+// ============================================================================
+// Data Flow Analysis Types
+// ============================================================================
+
+export interface DataFlowAnalysis {
+    sources: DataSource[];          // Data sources
+    sinks: DataSink[];              // Data sinks
+    paths: DataFlowPath[];          // Paths from sources to sinks
+    entities: Entity[];             // All entities
+    relationships: Relationship[];  // Entity relationships
+    conditions: Condition[];        // Conditional branches
+    objectGraph: ObjectRelation[];  // Object relationship graph
+    callGraph: CallRelation[];      // Call relationship graph
+}
+
+export interface DataSource {
+    id: string;
+    name: string;
+    type: 'superglobal' | 'file' | 'network' | 'database';
+    line: number;
+    column: number;
+    isTainted: boolean;
+    location: vscode.Location;
+}
+
+export interface DataSink {
+    id: string;
+    name: string;
+    type: 'eval' | 'exec' | 'sql' | 'file' | 'deserialization' | 'callback';
+    line: number;
+    column: number;
+    severity: 'critical' | 'high' | 'medium' | 'low';
+    location: vscode.Location;
+}
+
+export interface DataFlowPath {
+    id: string;
+    source: DataSource;
+    sink: DataSink;
+    path: PathNode[];               // Intermediate nodes
+    isTainted: boolean;             // Whether data is tainted
+    vulnerabilityType: string;      // Vulnerability type
+    severity: 'critical' | 'high' | 'medium' | 'low';
+    conditions: Condition[];        // Conditions along the path
+}
+
+export interface PathNode {
+    id: string;
+    type: 'variable' | 'function' | 'property' | 'parameter' | 'return';
+    name: string;
+    line: number;
+    column: number;
+    operation?: string;
+    location: vscode.Location;
+}
+
+export interface Entity {
+    id: string;
+    name: string;
+    type: 'source' | 'sink' | 'transformer' | 'object' | 'variable' | 'function';
+    line: number;
+    column: number;
+    value?: string;
+    isTainted?: boolean;
+    location: vscode.Location;
+}
+
+export interface Relationship {
+    id: string;
+    source: Entity;
+    target: Entity;
+    type: 'assign' | 'call' | 'access' | 'return' | 'parameter';
+    isTainted: boolean;
+    conditions?: Condition[];
+    location: vscode.Location;
+}
+
+export interface ObjectRelation {
+    objectName: string;
+    className: string;
+    line: number;
+    column: number;
+    properties: PropertyAccess[];
+    methods: MethodCall[];
+    methodChains: MethodChain[];
+    location: vscode.Location;
+}
+
+export interface PropertyAccess {
+    objectName: string;
+    propertyName: string;
+    line: number;
+    column: number;
+    isWrite: boolean;
+    isTainted: boolean;
+    location: vscode.Location;
+}
+
+export interface MethodCall {
+    objectName: string;
+    methodName: string;
+    arguments: Entity[];
+    line: number;
+    column: number;
+    isTainted: boolean;
+    location: vscode.Location;
+}
+
+export interface MethodChain {
+    chain: MethodCall[];
+    isTainted: boolean;
+}
+
+export interface CallRelation {
+    caller: string;
+    callee: string;
+    arguments: Entity[];
+    returnValue?: Entity;
+    line: number;
+    column: number;
+    isRecursive: boolean;
+    isTainted: boolean;
+    location: vscode.Location;
+}
+
+export interface Condition {
+    type: 'if' | 'switch' | 'ternary' | 'logical';
+    line: number;
+    column: number;
+    expression: string;
+    branches: ConditionalBranch[];
+    location: vscode.Location;
+}
+
+export interface ConditionalBranch {
+    condition: string;
+    nodes: PathNode[];
+    isTainted: boolean;
 }

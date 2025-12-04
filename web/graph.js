@@ -211,7 +211,8 @@ function renderGraph(graphData) {
             source: edge.source,
             target: edge.target,
             type: edge.type,
-            label: edge.label || ''
+            label: edge.label || '',
+            metadata: edge.metadata
         }
     }));
     
@@ -236,6 +237,9 @@ function renderGraph(graphData) {
         coolingFactor: 0.95,
         minTemp: 1.0
     }).run();
+    
+    // Update statistics
+    updateStatsDisplay();
 }
 
 // Clear graph
@@ -415,6 +419,244 @@ function showNotification(message, type = 'info') {
     
     const toast = new bootstrap.Toast(toastEl);
     toast.show();
+}
+
+// ============================================================================
+// Enhanced Data Flow Visualization Features
+// ============================================================================
+
+// Highlight taint paths - show all paths from sources to sinks
+function highlightTaintPaths() {
+    if (!cy) { return; }
+    
+    // Reset all highlighting
+    cy.elements().removeClass('highlighted');
+    
+    // Find all source nodes
+    const sources = cy.nodes().filter(node => node.data('type') === 'source');
+    
+    // Find all sink nodes
+    const sinks = cy.nodes().filter(node => node.data('type') === 'sink');
+    
+    if (sources.length === 0 || sinks.length === 0) {
+        showNotification('No sources or sinks found in the graph', 'info');
+        return;
+    }
+    
+    let pathCount = 0;
+    
+    // For each source, find paths to sinks
+    sources.forEach(source => {
+        sinks.forEach(sink => {
+            const paths = cy.elements().dijkstra({
+                root: source,
+                directed: true
+            }).pathTo(sink);
+            
+            if (paths && paths.length > 0) {
+                paths.addClass('highlighted');
+                pathCount++;
+            }
+        });
+    });
+    
+    if (pathCount > 0) {
+        showNotification(`Highlighted ${pathCount} taint path(s)`, 'success');
+    } else {
+        showNotification('No paths found from sources to sinks', 'warning');
+    }
+}
+
+// Clear all highlighting
+function clearHighlighting() {
+    if (!cy) { return; }
+    cy.elements().removeClass('highlighted');
+    showNotification('Cleared highlighting', 'info');
+}
+
+// Filter by node type
+function filterByType(type) {
+    if (!cy) { return; }
+    
+    if (type === 'all') {
+        cy.elements().removeClass('filtered');
+        showNotification('Showing all nodes', 'info');
+        return;
+    }
+    
+    cy.nodes().forEach(node => {
+        if (node.data('type') === type) {
+            node.removeClass('filtered');
+        } else {
+            node.addClass('filtered');
+        }
+    });
+    
+    showNotification(`Filtered to show only ${type} nodes`, 'info');
+}
+
+// Show only critical paths (severity: critical or high)
+function showCriticalPaths() {
+    if (!cy) { return; }
+    
+    cy.elements().addClass('filtered');
+    
+    let criticalCount = 0;
+    
+    // Find edges with critical/high severity
+    cy.edges().forEach(edge => {
+        const metadata = edge.data('metadata');
+        if (metadata && (metadata.severity === 'critical' || metadata.severity === 'high')) {
+            edge.removeClass('filtered');
+            edge.source().removeClass('filtered');
+            edge.target().removeClass('filtered');
+            criticalCount++;
+        }
+    });
+    
+    if (criticalCount > 0) {
+        showNotification(`Showing ${criticalCount} critical path(s)`, 'success');
+    } else {
+        showNotification('No critical paths found', 'warning');
+        cy.elements().removeClass('filtered');
+    }
+}
+
+// Highlight vulnerability types
+function highlightVulnerabilityType(vulnType) {
+    if (!cy) { return; }
+    
+    cy.elements().removeClass('highlighted');
+    
+    let count = 0;
+    
+    cy.edges().forEach(edge => {
+        const metadata = edge.data('metadata');
+        if (metadata && metadata.vulnerabilityType && 
+            metadata.vulnerabilityType.toLowerCase().includes(vulnType.toLowerCase())) {
+            edge.addClass('highlighted');
+            edge.source().addClass('highlighted');
+            edge.target().addClass('highlighted');
+            count++;
+        }
+    });
+    
+    if (count > 0) {
+        showNotification(`Highlighted ${count} ${vulnType} vulnerability path(s)`, 'success');
+    } else {
+        showNotification(`No ${vulnType} vulnerabilities found`, 'warning');
+    }
+}
+
+// Show node neighbors (connected nodes)
+function showNeighbors(node) {
+    if (!cy || !node) { return; }
+    
+    cy.elements().addClass('filtered');
+    node.removeClass('filtered');
+    
+    // Show connected nodes
+    const neighbors = node.neighborhood();
+    neighbors.removeClass('filtered');
+    
+    showNotification(`Showing neighbors of ${node.data('label')}`, 'info');
+}
+
+// Find shortest path between two nodes
+function findShortestPath(sourceId, targetId) {
+    if (!cy) { return; }
+    
+    const source = cy.getElementById(sourceId);
+    const target = cy.getElementById(targetId);
+    
+    if (!source.length || !target.length) {
+        showNotification('Source or target node not found', 'error');
+        return;
+    }
+    
+    cy.elements().removeClass('highlighted');
+    
+    const dijkstra = cy.elements().dijkstra({
+        root: source,
+        directed: true
+    });
+    
+    const path = dijkstra.pathTo(target);
+    
+    if (path && path.length > 0) {
+        path.addClass('highlighted');
+        showNotification(`Found path from ${source.data('label')} to ${target.data('label')}`, 'success');
+    } else {
+        showNotification('No path found between selected nodes', 'warning');
+    }
+}
+
+// Get statistics about the current graph
+function getGraphStats() {
+    if (!cy) { 
+        return { nodes: 0, edges: 0, sources: 0, sinks: 0, paths: 0 };
+    }
+    
+    const stats = {
+        nodes: cy.nodes().length,
+        edges: cy.edges().length,
+        sources: cy.nodes().filter(n => n.data('type') === 'source').length,
+        sinks: cy.nodes().filter(n => n.data('type') === 'sink').length,
+        taintedNodes: cy.nodes().filter(n => n.data('metadata')?.isTainted === true).length,
+        vulnerabilities: {
+            critical: 0,
+            high: 0,
+            medium: 0,
+            low: 0
+        }
+    };
+    
+    // Count vulnerabilities by severity
+    cy.edges().forEach(edge => {
+        const metadata = edge.data('metadata');
+        if (metadata && metadata.severity) {
+            stats.vulnerabilities[metadata.severity] = (stats.vulnerabilities[metadata.severity] || 0) + 1;
+        }
+    });
+    
+    return stats;
+}
+
+// Update statistics display
+function updateStatsDisplay() {
+    const stats = getGraphStats();
+    const statsDiv = document.getElementById('graphStats');
+    
+    if (!statsDiv) { return; }
+    
+    statsDiv.innerHTML = '';
+    
+    const title = document.createElement('h6');
+    title.textContent = 'Graph Statistics';
+    statsDiv.appendChild(title);
+    
+    const list = document.createElement('ul');
+    list.className = 'list-unstyled';
+    
+    const items = [
+        `Nodes: ${stats.nodes}`,
+        `Edges: ${stats.edges}`,
+        `Sources: ${stats.sources}`,
+        `Sinks: ${stats.sinks}`,
+        `Tainted: ${stats.taintedNodes}`,
+        `Critical: ${stats.vulnerabilities.critical}`,
+        `High: ${stats.vulnerabilities.high}`,
+        `Medium: ${stats.vulnerabilities.medium}`,
+        `Low: ${stats.vulnerabilities.low}`
+    ];
+    
+    items.forEach(item => {
+        const li = document.createElement('li');
+        li.textContent = item;
+        list.appendChild(li);
+    });
+    
+    statsDiv.appendChild(list);
 }
 
 // Initialize on page load

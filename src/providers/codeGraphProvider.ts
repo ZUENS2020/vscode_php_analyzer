@@ -1,5 +1,5 @@
 import * as vscode from 'vscode';
-import { CodeGraph, GraphNode, GraphEdge } from '../types';
+import { CodeGraph, GraphNode, GraphEdge, DataSource, DataSink, Entity, Relationship, DataFlowPath, ObjectRelation, PropertyAccess, MethodCall, CallRelation, Condition } from '../types';
 
 export class CodeGraphProvider implements vscode.WebviewViewProvider {
     private _view?: vscode.WebviewView;
@@ -165,25 +165,287 @@ export class CodeGraphProvider implements vscode.WebviewViewProvider {
         const nodes: GraphNode[] = [];
         const edges: GraphEdge[] = [];
 
-        // Simplified data flow - just show sources and sinks
-        const sources = ['$_GET', '$_POST', '$_COOKIE', '$_REQUEST'];
-        const sinks = ['eval', 'system', 'exec', 'unserialize'];
+        // Import the comprehensive analyzers
+        const { DataFlowAnalyzer } = require('../analyzers/dataFlowAnalyzer');
+        const { ObjectRelationAnalyzer } = require('../analyzers/objectRelationAnalyzer');
+        const { CallGraphAnalyzer } = require('../analyzers/callGraphAnalyzer');
+        const { ConditionalPathAnalyzer } = require('../analyzers/conditionalPathAnalyzer');
 
-        sources.forEach(source => {
-            nodes.push({
-                id: source,
-                label: source,
-                type: 'source'
-            });
-        });
+        try {
+            // Run data flow analysis
+            const dataFlowAnalyzer = new DataFlowAnalyzer(ast, document);
+            const dataFlowAnalysis = dataFlowAnalyzer.analyze();
 
-        sinks.forEach(sink => {
-            nodes.push({
-                id: sink,
-                label: sink + '()',
-                type: 'sink'
+            // Add sources to nodes
+            dataFlowAnalysis.sources.forEach((source: DataSource) => {
+                nodes.push({
+                    id: source.id,
+                    label: source.name,
+                    type: 'source',
+                    metadata: {
+                        sourceType: source.type,
+                        isTainted: source.isTainted,
+                        line: source.line,
+                        column: source.column
+                    }
+                });
             });
-        });
+
+            // Add sinks to nodes
+            dataFlowAnalysis.sinks.forEach((sink: DataSink) => {
+                nodes.push({
+                    id: sink.id,
+                    label: sink.name,
+                    type: 'sink',
+                    metadata: {
+                        sinkType: sink.type,
+                        severity: sink.severity,
+                        line: sink.line,
+                        column: sink.column
+                    }
+                });
+            });
+
+            // Add entities (transformers, variables, functions, objects)
+            dataFlowAnalysis.entities.forEach((entity: Entity) => {
+                // Skip sources and sinks (already added)
+                if (entity.type !== 'source' && entity.type !== 'sink') {
+                    nodes.push({
+                        id: entity.id,
+                        label: entity.name,
+                        type: entity.type as any,
+                        metadata: {
+                            isTainted: entity.isTainted,
+                            line: entity.line,
+                            column: entity.column,
+                            value: entity.value
+                        }
+                    });
+                }
+            });
+
+            // Add relationships as edges
+            dataFlowAnalysis.relationships.forEach((rel: Relationship) => {
+                edges.push({
+                    source: rel.source.id,
+                    target: rel.target.id,
+                    type: 'dataflow',
+                    label: rel.type,
+                    metadata: {
+                        isTainted: rel.isTainted,
+                        conditions: rel.conditions
+                    }
+                } as any);
+            });
+
+            // Add data flow paths as highlighted edges
+            dataFlowAnalysis.paths.forEach((path: DataFlowPath) => {
+                // Connect source to first path node
+                if (path.path.length > 0) {
+                    edges.push({
+                        source: path.source.id,
+                        target: path.path[0].id,
+                        type: 'dataflow',
+                        label: 'flows to',
+                        metadata: {
+                            isTainted: path.isTainted,
+                            vulnerabilityType: path.vulnerabilityType,
+                            severity: path.severity
+                        }
+                    } as any);
+
+                    // Connect path nodes
+                    for (let i = 0; i < path.path.length - 1; i++) {
+                        edges.push({
+                            source: path.path[i].id,
+                            target: path.path[i + 1].id,
+                            type: 'dataflow',
+                            label: path.path[i].operation || 'flows to',
+                            metadata: {
+                                isTainted: path.isTainted
+                            }
+                        } as any);
+                    }
+
+                    // Connect last path node to sink
+                    if (path.path.length > 0) {
+                        edges.push({
+                            source: path.path[path.path.length - 1].id,
+                            target: path.sink.id,
+                            type: 'dataflow',
+                            label: 'reaches',
+                            metadata: {
+                                isTainted: path.isTainted,
+                                vulnerabilityType: path.vulnerabilityType,
+                                severity: path.severity
+                            }
+                        } as any);
+                    }
+                } else {
+                    // Direct connection from source to sink
+                    edges.push({
+                        source: path.source.id,
+                        target: path.sink.id,
+                        type: 'dataflow',
+                        label: 'direct flow',
+                        metadata: {
+                            isTainted: path.isTainted,
+                            vulnerabilityType: path.vulnerabilityType,
+                            severity: path.severity
+                        }
+                    } as any);
+                }
+            });
+
+            // Run object relation analysis
+            const objectAnalyzer = new ObjectRelationAnalyzer(ast, document);
+            const objectRelations = objectAnalyzer.analyze();
+
+            // Add object nodes and edges
+            objectRelations.forEach((objRel: ObjectRelation) => {
+                const objNodeId = `object_${objRel.objectName}`;
+                nodes.push({
+                    id: objNodeId,
+                    label: `${objRel.objectName} (${objRel.className})`,
+                    type: 'class',
+                    metadata: {
+                        className: objRel.className,
+                        line: objRel.line,
+                        column: objRel.column
+                    }
+                });
+
+                // Add property access edges
+                objRel.properties.forEach((prop: PropertyAccess) => {
+                    const propNodeId = `prop_${objRel.objectName}_${prop.propertyName}`;
+                    nodes.push({
+                        id: propNodeId,
+                        label: prop.propertyName,
+                        type: 'property',
+                        metadata: {
+                            isWrite: prop.isWrite,
+                            isTainted: prop.isTainted
+                        }
+                    });
+
+                    edges.push({
+                        source: objNodeId,
+                        target: propNodeId,
+                        type: 'contains',
+                        label: prop.isWrite ? 'writes' : 'reads'
+                    });
+                });
+
+                // Add method call edges
+                objRel.methods.forEach((method: MethodCall) => {
+                    const methodNodeId = `method_${objRel.objectName}_${method.methodName}_${method.line}`;
+                    nodes.push({
+                        id: methodNodeId,
+                        label: `${method.methodName}()`,
+                        type: 'method',
+                        metadata: {
+                            isTainted: method.isTainted,
+                            arguments: method.arguments
+                        }
+                    });
+
+                    edges.push({
+                        source: objNodeId,
+                        target: methodNodeId,
+                        type: 'calls',
+                        label: 'calls'
+                    });
+                });
+            });
+
+            // Run call graph analysis
+            const callAnalyzer = new CallGraphAnalyzer(ast, document);
+            const callRelations = callAnalyzer.analyze();
+
+            // Add call graph nodes and edges
+            const functionNodes = new Set<string>();
+            callRelations.forEach((call: CallRelation) => {
+                // Add caller node if not exists
+                if (!functionNodes.has(call.caller)) {
+                    nodes.push({
+                        id: `func_${call.caller}`,
+                        label: call.caller,
+                        type: 'method',
+                        metadata: {
+                            isFunction: true
+                        }
+                    });
+                    functionNodes.add(call.caller);
+                }
+
+                // Add callee node if not exists
+                if (!functionNodes.has(call.callee)) {
+                    nodes.push({
+                        id: `func_${call.callee}`,
+                        label: call.callee,
+                        type: 'method',
+                        metadata: {
+                            isFunction: true
+                        }
+                    });
+                    functionNodes.add(call.callee);
+                }
+
+                // Add call edge
+                edges.push({
+                    source: `func_${call.caller}`,
+                    target: `func_${call.callee}`,
+                    type: 'calls',
+                    label: call.isRecursive ? 'recursive call' : 'calls',
+                    metadata: {
+                        isRecursive: call.isRecursive,
+                        isTainted: call.isTainted,
+                        arguments: call.arguments
+                    }
+                } as any);
+            });
+
+            // Run conditional path analysis
+            const conditionalAnalyzer = new ConditionalPathAnalyzer(ast, document);
+            const conditions = conditionalAnalyzer.analyze();
+
+            // Add condition nodes
+            conditions.forEach((condition: Condition, index: number) => {
+                const condNodeId = `cond_${condition.type}_${condition.line}_${condition.column}`;
+                nodes.push({
+                    id: condNodeId,
+                    label: `${condition.type}: ${condition.expression.substring(0, 30)}`,
+                    type: 'method',
+                    metadata: {
+                        conditionType: condition.type,
+                        expression: condition.expression,
+                        branches: condition.branches.length
+                    }
+                });
+            });
+
+        } catch (error: any) {
+            console.error('Error in data flow analysis:', error);
+            // Return simplified graph on error
+            const sources = ['$_GET', '$_POST', '$_COOKIE', '$_REQUEST'];
+            const sinks = ['eval', 'system', 'exec', 'unserialize'];
+
+            sources.forEach(source => {
+                nodes.push({
+                    id: source,
+                    label: source,
+                    type: 'source'
+                });
+            });
+
+            sinks.forEach(sink => {
+                nodes.push({
+                    id: sink,
+                    label: sink + '()',
+                    type: 'sink'
+                });
+            });
+        }
 
         return { nodes, edges };
     }

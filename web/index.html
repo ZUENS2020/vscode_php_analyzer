@@ -82,6 +82,29 @@
                         <h5>Search & Filter</h5>
                         <input type="text" class="form-control mb-2" id="searchInput" placeholder="Search nodes..." oninput="filterNodes()">
                         
+                        <!-- Data Flow Analysis Controls -->
+                        <h5 class="mt-3">Data Flow Analysis</h5>
+                        <div class="btn-group-vertical w-100 mb-3" role="group">
+                            <button type="button" class="btn btn-sm btn-warning" onclick="highlightTaintPaths()">Highlight Taint Paths</button>
+                            <button type="button" class="btn btn-sm btn-danger" onclick="showCriticalPaths()">Show Critical Only</button>
+                            <button type="button" class="btn btn-sm btn-secondary" onclick="clearHighlighting()">Clear Highlighting</button>
+                        </div>
+                        
+                        <h5 class="mt-3">Filter by Type</h5>
+                        <select class="form-select mb-2" onchange="filterByType(this.value)">
+                            <option value="all">All Nodes</option>
+                            <option value="source">Sources Only</option>
+                            <option value="sink">Sinks Only</option>
+                            <option value="class">Classes Only</option>
+                            <option value="method">Methods Only</option>
+                            <option value="property">Properties Only</option>
+                        </select>
+                        
+                        <h5 class="mt-3">Statistics</h5>
+                        <div id="graphStats" class="stats-panel">
+                            <p class="text-muted">Load a graph to see statistics</p>
+                        </div>
+                        
                         <h5 class="mt-3">Legend</h5>
                         <div class="legend">
                             <div class="legend-item">
