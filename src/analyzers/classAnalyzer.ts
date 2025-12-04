@@ -245,8 +245,8 @@ export class ClassAnalyzer {
             return false;
         }
 
-        // Check for dangerous operations in the method
-        const dangerousPatterns = [
+        // Check for dangerous operations in the method by traversing AST
+        const dangerousFunctions = [
             'eval',
             'system',
             'exec',
@@ -259,8 +259,50 @@ export class ClassAnalyzer {
             'require'
         ];
 
-        // Simple check - in a real implementation, would traverse the AST
-        const bodyStr = JSON.stringify(methodNode.body || {});
-        return dangerousPatterns.some(pattern => bodyStr.includes(pattern));
+        // Traverse the method body to look for dangerous function calls
+        const hasDangerousCall = (node: any): boolean => {
+            if (!node || typeof node !== 'object') {
+                return false;
+            }
+
+            if (node.kind === 'call') {
+                const funcName = this.extractFunctionName(node);
+                if (dangerousFunctions.includes(funcName)) {
+                    return true;
+                }
+            }
+
+            // Recursively check children
+            const keys = Object.keys(node);
+            for (const key of keys) {
+                if (key === 'loc') {
+                    continue;
+                }
+                const value = node[key];
+                if (Array.isArray(value)) {
+                    if (value.some(child => hasDangerousCall(child))) {
+                        return true;
+                    }
+                } else if (typeof value === 'object' && hasDangerousCall(value)) {
+                    return true;
+                }
+            }
+
+            return false;
+        };
+
+        return hasDangerousCall(methodNode.body);
+    }
+
+    private extractFunctionName(callNode: any): string {
+        if (callNode.what) {
+            if (callNode.what.kind === 'identifier') {
+                return callNode.what.name;
+            }
+            if (callNode.what.name) {
+                return callNode.what.name;
+            }
+        }
+        return '';
     }
 }

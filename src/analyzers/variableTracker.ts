@@ -19,8 +19,34 @@ export class VariableTracker {
         const references: VariableReference[] = [];
         const typeChanges: any[] = [];
 
-        // Find all variable nodes
-        const variableNodes = this.analyzer.findNodes(ast, (node) => {
+        // Find all nodes and build parent-child relationships
+        const nodesWithParents: Array<{ node: any; parent: any }> = [];
+        
+        const buildParentRefs = (node: any, parent: any = null) => {
+            if (!node || typeof node !== 'object') {
+                return;
+            }
+
+            nodesWithParents.push({ node, parent });
+
+            const keys = Object.keys(node);
+            for (const key of keys) {
+                if (key === 'loc') {
+                    continue;
+                }
+                const value = node[key];
+                if (Array.isArray(value)) {
+                    value.forEach(child => buildParentRefs(child, node));
+                } else if (typeof value === 'object') {
+                    buildParentRefs(value, node);
+                }
+            }
+        };
+
+        buildParentRefs(ast);
+
+        // Find all variable nodes with the target name
+        const variableNodes = nodesWithParents.filter(({ node }) => {
             if (node.kind === 'variable') {
                 const name = this.analyzer.extractVariableName(node);
                 return name === normalizedName;
@@ -29,23 +55,23 @@ export class VariableTracker {
         });
 
         // Categorize nodes as definitions or references
-        for (const node of variableNodes) {
+        for (const { node, parent } of variableNodes) {
             const location = this.analyzer.getLocation(node);
             if (!location) continue;
 
             // Check if this is a definition (assignment)
-            if (this.isDefinition(node)) {
+            if (this.isDefinition(node, parent)) {
                 definitions.push({
                     name: normalizedName,
                     location: location,
-                    type: this.inferType(node),
-                    value: this.extractValue(node)
+                    type: this.inferType(node, parent),
+                    value: this.extractValue(node, parent)
                 });
             } else {
                 references.push({
                     name: normalizedName,
                     location: location,
-                    context: this.getContext(node)
+                    context: this.getContext(parent)
                 });
             }
         }
@@ -71,34 +97,68 @@ export class VariableTracker {
         };
     }
 
-    private isDefinition(node: any): boolean {
-        // Check if parent is an assignment
-        let current = node;
-        while (current) {
-            if (current.kind === 'assign' && current.left === node) {
-                return true;
-            }
-            if (current.kind === 'parameter') {
-                return true;
-            }
-            current = current.parent;
+    private isDefinition(node: any, parent: any): boolean {
+        if (!parent) {
+            return false;
         }
+
+        // Check if parent is an assignment and this node is the left side
+        if (parent.kind === 'assign' && parent.left === node) {
+            return true;
+        }
+
+        // Check if this is a function parameter
+        if (parent.kind === 'parameter') {
+            return true;
+        }
+
         return false;
     }
 
-    private inferType(node: any): string {
-        // Try to infer type from assignment value
-        let current = node;
-        while (current) {
-            if (current.kind === 'assign') {
-                const right = current.right;
-                if (right) {
-                    return this.getNodeType(right);
-                }
-            }
-            current = current.parent;
+    private inferType(node: any, parent: any): string {
+        if (!parent) {
+            return 'unknown';
         }
+
+        // Try to infer type from assignment value
+        if (parent.kind === 'assign' && parent.right) {
+            return this.getNodeType(parent.right);
+        }
+
         return 'unknown';
+    }
+
+    private extractValue(node: any, parent: any): string | null {
+        if (!parent) {
+            return null;
+        }
+
+        if (parent.kind === 'assign' && parent.right) {
+            return this.nodeToString(parent.right);
+        }
+
+        return null;
+    }
+
+    private getContext(parent: any): string {
+        if (!parent) {
+            return 'unknown';
+        }
+
+        switch (parent.kind) {
+            case 'call':
+                return 'function call';
+            case 'assign':
+                return 'assignment';
+            case 'return':
+                return 'return statement';
+            case 'if':
+                return 'condition';
+            case 'echo':
+                return 'echo statement';
+            default:
+                return parent.kind || 'unknown';
+        }
     }
 
     private getNodeType(node: any): string {
@@ -122,20 +182,6 @@ export class VariableTracker {
         }
     }
 
-    private extractValue(node: any): string | null {
-        let current = node;
-        while (current) {
-            if (current.kind === 'assign') {
-                const right = current.right;
-                if (right) {
-                    return this.nodeToString(right);
-                }
-            }
-            current = current.parent;
-        }
-        return null;
-    }
-
     private nodeToString(node: any): string {
         if (!node) return '';
 
@@ -155,26 +201,5 @@ export class VariableTracker {
             default:
                 return '...';
         }
-    }
-
-    private getContext(node: any): string {
-        const current = node.parent;
-        if (current) {
-            switch (current.kind) {
-                case 'call':
-                    return 'function call';
-                case 'assign':
-                    return 'assignment';
-                case 'return':
-                    return 'return statement';
-                case 'if':
-                    return 'condition';
-                case 'echo':
-                    return 'echo statement';
-                default:
-                    return current.kind || 'unknown';
-            }
-        }
-        return 'unknown';
     }
 }

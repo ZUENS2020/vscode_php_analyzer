@@ -36,9 +36,10 @@ export class PhpAnalyzer {
                 results.push(node);
             }
 
-            // Traverse children
-            for (const key in node) {
-                if (key === 'loc' || key === 'parent') {
+            // Traverse children using Object.keys to avoid prototype chain issues
+            const keys = Object.keys(node);
+            for (const key of keys) {
+                if (key === 'loc') {
                     continue;
                 }
 

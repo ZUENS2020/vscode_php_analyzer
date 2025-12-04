@@ -85,18 +85,63 @@ export class SerializationAnalyzer {
     }
 
     private isUserControlled(node: any): boolean {
-        // Check if the data comes from user input
+        // Check if the data comes from user input by traversing the AST
         const userInputSources = [
             '$_GET',
             '$_POST',
             '$_REQUEST',
             '$_COOKIE',
-            '$_FILES',
-            'file_get_contents'
+            '$_FILES'
         ];
 
-        const nodeStr = JSON.stringify(node);
-        return userInputSources.some(source => nodeStr.includes(source));
+        // Check if this node or its children reference user input
+        const checkNode = (n: any): boolean => {
+            if (!n || typeof n !== 'object') {
+                return false;
+            }
+
+            // Check for variable names
+            if (n.kind === 'variable') {
+                const varName = '$' + (n.name || '');
+                if (userInputSources.includes(varName)) {
+                    return true;
+                }
+            }
+
+            // Check for offsetlookup (array access)
+            if (n.kind === 'offsetlookup') {
+                if (n.what && checkNode(n.what)) {
+                    return true;
+                }
+            }
+
+            // Check for call to file_get_contents or similar
+            if (n.kind === 'call') {
+                const funcName = this.extractFunctionName(n);
+                if (funcName === 'file_get_contents') {
+                    return true;
+                }
+            }
+
+            // Recursively check children
+            for (const key in n) {
+                if (key === 'loc' || key === 'parent') {
+                    continue;
+                }
+                const value = n[key];
+                if (Array.isArray(value)) {
+                    if (value.some(child => checkNode(child))) {
+                        return true;
+                    }
+                } else if (typeof value === 'object' && checkNode(value)) {
+                    return true;
+                }
+            }
+
+            return false;
+        };
+
+        return checkNode(node);
     }
 
     private traceDataSource(node: any): string {
