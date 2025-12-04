@@ -1428,6 +1428,11 @@ export class POPChainDetector {
                 return false;
             }
             
+            // 关键修复：如果有 parenthesizedExpression 标志，说明是 ($this->prop)()，这是动态函数调用
+            if (node.parenthesizedExpression === true) {
+                return true;
+            }
+            
             // 如果 offset 是 identifier，这是静态方法调用 $this->method()，不是动态
             // 如果 offset 是 variable，这是动态方法调用 $this->$method()
             if (offset?.kind === 'identifier') {
@@ -2295,22 +2300,33 @@ export class POPChainDetector {
                                                 const invokeAllProps = this.getAllClassProperties(invokeGadget.className);
                                                 const invokeClassPropUsage = this.getPropertyUsageTypes(invokeGadget.className);
                                                 
-                                                for (const invokeProp of invokeAllProps) {
-                                                    const isInvCallable = invokeClassPropUsage.callable.has(invokeProp.name);
-                                                    const isInvObject = invokeClassPropUsage.asObject.has(invokeProp.name);
-                                                    
-                                                    if (isInvObject) {
-                                                        invokeClassProps.push({ name: invokeProp.name, value: 'new stdClass()', comment: '用作对象的属性' });
-                                                    } else if (isInvCallable) {
-                                                        invokeClassProps.push({ name: invokeProp.name, value: '"var_dump"', comment: '用作 callable' });
-                                                    } else {
-                                                        invokeClassProps.push({ name: invokeProp.name, value: 'new stdClass()', comment: '默认值' });
+                                                // 检查是否所有属性都是私有的
+                                                const allPrivate = invokeAllProps.every(p => p.visibility === 'private' || p.visibility === 'protected');
+                                                
+                                                // 只在有公共属性时才尝试设置属性
+                                                if (!allPrivate) {
+                                                    for (const invokeProp of invokeAllProps) {
+                                                        // 跳过私有属性
+                                                        if (invokeProp.visibility === 'private' || invokeProp.visibility === 'protected') {
+                                                            continue;
+                                                        }
+                                                        
+                                                        const isInvCallable = invokeClassPropUsage.callable.has(invokeProp.name);
+                                                        const isInvObject = invokeClassPropUsage.asObject.has(invokeProp.name);
+                                                        
+                                                        if (isInvObject) {
+                                                            invokeClassProps.push({ name: invokeProp.name, value: 'new stdClass()', comment: '用作对象的属性' });
+                                                        } else if (isInvCallable) {
+                                                            invokeClassProps.push({ name: invokeProp.name, value: '"var_dump"', comment: '用作 callable' });
+                                                        } else {
+                                                            invokeClassProps.push({ name: invokeProp.name, value: 'new stdClass()', comment: '默认值' });
+                                                        }
                                                     }
                                                 }
                                                 
                                                 const invokeVarName = `$invokeObj_${classProp.name}`;
                                                 objectVars.push({ varName: invokeVarName, className: invokeGadget.className, props: invokeClassProps });
-                                                innerProps.push({ name: classProp.name, value: invokeVarName, comment: `${invokeGadget.className} 对象 (有 __invoke)` });
+                                                innerProps.push({ name: classProp.name, value: invokeVarName, comment: `${invokeGadget.className} 对象 (有 __invoke${allPrivate ? ', 属性为私有' : ''})` });
                                             } else {
                                                 innerProps.push({ name: classProp.name, value: 'new stdClass()', comment: '同时用作对象和 callable' });
                                             }
@@ -2528,28 +2544,39 @@ export class POPChainDetector {
                                                 const invokeClassPropUsage = this.getPropertyUsageTypes(invokeGadget.className);
                                                 const invokeAllProps = this.getAllClassProperties(invokeGadget.className);
                                                 
-                                                for (const invokeProp of invokeAllProps) {
-                                                    const isInvokeCallable = invokeClassPropUsage.callable.has(invokeProp.name);
-                                                    const isInvokeObject = invokeClassPropUsage.asObject.has(invokeProp.name);
-                                                    
-                                                    if (isInvokeObject) {
-                                                        invokeClassProps.push({
-                                                            name: invokeProp.name,
-                                                            value: 'new stdClass()',
-                                                            comment: `用作对象的属性`
-                                                        });
-                                                    } else if (isInvokeCallable) {
-                                                        invokeClassProps.push({
-                                                            name: invokeProp.name,
-                                                            value: '"var_dump"',
-                                                            comment: `用作 callable 的属性`
-                                                        });
-                                                    } else {
-                                                        invokeClassProps.push({
-                                                            name: invokeProp.name,
-                                                            value: 'new stdClass()',
-                                                            comment: `默认值`
-                                                        });
+                                                // 检查是否所有属性都是私有的
+                                                const allPrivate = invokeAllProps.every(p => p.visibility === 'private' || p.visibility === 'protected');
+                                                
+                                                // 只在有公共属性时才尝试设置属性
+                                                if (!allPrivate) {
+                                                    for (const invokeProp of invokeAllProps) {
+                                                        // 跳过私有属性
+                                                        if (invokeProp.visibility === 'private' || invokeProp.visibility === 'protected') {
+                                                            continue;
+                                                        }
+                                                        
+                                                        const isInvokeCallable = invokeClassPropUsage.callable.has(invokeProp.name);
+                                                        const isInvokeObject = invokeClassPropUsage.asObject.has(invokeProp.name);
+                                                        
+                                                        if (isInvokeObject) {
+                                                            invokeClassProps.push({
+                                                                name: invokeProp.name,
+                                                                value: 'new stdClass()',
+                                                                comment: `用作对象的属性`
+                                                            });
+                                                        } else if (isInvokeCallable) {
+                                                            invokeClassProps.push({
+                                                                name: invokeProp.name,
+                                                                value: '"var_dump"',
+                                                                comment: `用作 callable 的属性`
+                                                            });
+                                                        } else {
+                                                            invokeClassProps.push({
+                                                                name: invokeProp.name,
+                                                                value: 'new stdClass()',
+                                                                comment: `默认值`
+                                                            });
+                                                        }
                                                     }
                                                 }
                                                 
@@ -2564,7 +2591,7 @@ export class POPChainDetector {
                                                 innerProps.push({
                                                     name: classProp.name,
                                                     value: invokeVarName,
-                                                    comment: `${invokeGadget.className} 对象 (有 __invoke)`
+                                                    comment: `${invokeGadget.className} 对象 (有 __invoke${allPrivate ? ', 属性为私有' : ''})`
                                                 });
                                             } else {
                                                 // 没有 __invoke 类，使用 stdClass
@@ -2749,11 +2776,12 @@ export class POPChainDetector {
         // __wakeup 绕过提示
         if (objectVars.length > 0) {
             code += `\n// === 绕过 __wakeup (CVE-2016-7124, PHP < 7.4.26) ===\n`;
-            code += `$payload_bypass = $payload;\n`;
+            code += `// 注意: 此绕过需要手动修改序列化字符串中的属性数量\n`;
+            code += `// 将 O:X:"ClassName":N: 改为 O:X:"ClassName":(N+1):\n`;
             for (const obj of objectVars) {
-                code += `$payload_bypass = preg_replace('/${obj.className}:(\\d+):/', '${obj.className}:' . ('\\$1' + 1) . ':', $payload_bypass);\n`;
+                code += `// 例如: ${obj.className} 的属性数量 +1\n`;
             }
-            code += `echo "Payload (bypass __wakeup):\\n" . urlencode($payload_bypass) . "\\n";\n`;
+            code += `\n`;
         }
 
         return code;
