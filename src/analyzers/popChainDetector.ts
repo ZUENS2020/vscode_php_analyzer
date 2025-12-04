@@ -265,9 +265,13 @@ export class POPChainDetector {
 
     /**
      * Check if a property lookup is in a write context (assignment)
+     * NOTE: This is a simplified implementation. Full context detection would require
+     * parent node tracking during AST traversal, which is not currently implemented.
+     * This may lead to some false positives in __set trigger detection.
      */
     private isInWriteContext(node: any): boolean {
-        // This is a simplified check - ideally we'd track parent nodes
+        // Simplified: assume property lookups could be writes
+        // A full implementation would need to check if this node is the left side of an assignment
         return true;
     }
 }

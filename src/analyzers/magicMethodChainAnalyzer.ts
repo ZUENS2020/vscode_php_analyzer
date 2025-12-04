@@ -274,10 +274,13 @@ export class MagicMethodChainAnalyzer {
 
     /**
      * Check if a node is in an assignment context (left side of assignment)
+     * NOTE: This is a simplified implementation. Full context detection would require
+     * parent node tracking during AST traversal, which is not currently implemented.
+     * This may lead to some false positives in __set trigger detection.
      */
     private isInAssignmentContext(node: any): boolean {
-        // This is a simplified check - in a real implementation,
-        // we'd need to track parent nodes to determine context
+        // Simplified: assume property lookups could be in assignment context
+        // A full implementation would need to track parent nodes to determine actual context
         return true;
     }
 

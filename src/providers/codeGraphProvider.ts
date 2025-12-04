@@ -216,8 +216,11 @@ export class CodeGraphProvider implements vscode.WebviewViewProvider {
 
         // 4. Add magic method trigger chains
         for (const chain of magicChains) {
-            const entryMethodId = chain.entryPoint.replace('::', '_');
-            const entryNodeId = `method_${entryMethodId}`;
+            // Extract className and methodName from chain.entryPoint (format: "ClassName::methodName")
+            const parts = chain.entryPoint.split('::');
+            const entryClassName = parts[0];
+            const entryMethodName = parts[1];
+            const entryNodeId = `method_${entryClassName}_${entryMethodName}`;
 
             for (const trigger of chain.chain) {
                 if (trigger.methodName.startsWith('__')) {

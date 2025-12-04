@@ -59,6 +59,19 @@ const EDGE_WIDTHS = {
 
 // Initialize Cytoscape
 function initializeCytoscape() {
+    // Helper function to get node size based on type
+    function getNodeSize(type) {
+        const sizes = {
+            'entry': 60,
+            'class': 60,
+            'magic': 50,
+            'sink': 50,
+            'source': 50,
+            'property': 30
+        };
+        return sizes[type] || 40;
+    }
+
     cy = cytoscape({
         container: document.getElementById('cy'),
         
@@ -78,21 +91,10 @@ function initializeCytoscape() {
                     'text-halign': 'center',
                     'font-size': '12px',
                     'width': function(ele) {
-                        // Entry points are larger
-                        return ele.data('type') === 'entry' ? 60 : 
-                               ele.data('type') === 'class' ? 60 : 
-                               ele.data('type') === 'magic' ? 50 : 
-                               ele.data('type') === 'sink' ? 50 : 
-                               ele.data('type') === 'source' ? 50 : 
-                               ele.data('type') === 'property' ? 30 : 40;
+                        return getNodeSize(ele.data('type'));
                     },
                     'height': function(ele) {
-                        return ele.data('type') === 'entry' ? 60 : 
-                               ele.data('type') === 'class' ? 60 : 
-                               ele.data('type') === 'magic' ? 50 : 
-                               ele.data('type') === 'sink' ? 50 : 
-                               ele.data('type') === 'source' ? 50 : 
-                               ele.data('type') === 'property' ? 30 : 40;
+                        return getNodeSize(ele.data('type'));
                     },
                     'border-width': 2,
                     'border-color': '#fff',
