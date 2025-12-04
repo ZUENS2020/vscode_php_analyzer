@@ -1,0 +1,128 @@
+{
+  "name": "php-code-analyzer",
+  "displayName": "PHP Code Analyzer for CTF",
+  "description": "PHP code analysis and visualization tracking for CTF PHP deserialization challenges",
+  "version": "0.1.0",
+  "publisher": "ctf-tools",
+  "engines": {
+    "vscode": "^1.75.0"
+  },
+  "categories": [
+    "Programming Languages",
+    "Debuggers",
+    "Visualization"
+  ],
+  "keywords": [
+    "php",
+    "ctf",
+    "deserialization",
+    "security",
+    "analysis"
+  ],
+  "activationEvents": [
+    "onLanguage:php"
+  ],
+  "main": "./out/extension.js",
+  "contributes": {
+    "commands": [
+      {
+        "command": "phpAnalyzer.trackVariable",
+        "title": "Track Variable Flow",
+        "category": "PHP Analyzer"
+      },
+      {
+        "command": "phpAnalyzer.analyzeClass",
+        "title": "Analyze Class Relations",
+        "category": "PHP Analyzer"
+      },
+      {
+        "command": "phpAnalyzer.findSerializationPoints",
+        "title": "Find Serialization Points",
+        "category": "PHP Analyzer"
+      },
+      {
+        "command": "phpAnalyzer.findPOPChain",
+        "title": "Find POP Chain",
+        "category": "PHP Analyzer"
+      },
+      {
+        "command": "phpAnalyzer.showMagicMethods",
+        "title": "Show Magic Methods",
+        "category": "PHP Analyzer"
+      }
+    ],
+    "menus": {
+      "editor/context": [
+        {
+          "when": "editorTextFocus && resourceLangId == php",
+          "command": "phpAnalyzer.trackVariable",
+          "group": "navigation"
+        },
+        {
+          "when": "editorTextFocus && resourceLangId == php",
+          "command": "phpAnalyzer.analyzeClass",
+          "group": "navigation"
+        }
+      ]
+    },
+    "views": {
+      "explorer": [
+        {
+          "id": "phpAnalyzerView",
+          "name": "PHP Analyzer"
+        }
+      ]
+    },
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "php-analyzer",
+          "title": "PHP Analyzer",
+          "icon": "resources/icon.svg"
+        }
+      ]
+    },
+    "configuration": {
+      "title": "PHP Code Analyzer",
+      "properties": {
+        "phpAnalyzer.enableInlineHints": {
+          "type": "boolean",
+          "default": true,
+          "description": "Enable inline code hints for tracked variables and dangerous patterns"
+        },
+        "phpAnalyzer.highlightDangerousPatterns": {
+          "type": "boolean",
+          "default": true,
+          "description": "Highlight dangerous deserialization patterns"
+        },
+        "phpAnalyzer.showPOPChains": {
+          "type": "boolean",
+          "default": true,
+          "description": "Automatically detect and show POP chains"
+        }
+      }
+    }
+  },
+  "scripts": {
+    "vscode:prepublish": "npm run compile",
+    "compile": "tsc -p ./",
+    "watch": "tsc -watch -p ./",
+    "pretest": "npm run compile",
+    "lint": "eslint src --ext ts",
+    "test": "node ./out/test/runTest.js"
+  },
+  "devDependencies": {
+    "@types/node": "^18.0.0",
+    "@types/vscode": "^1.75.0",
+    "@typescript-eslint/eslint-plugin": "^6.0.0",
+    "@typescript-eslint/parser": "^6.0.0",
+    "eslint": "^8.45.0",
+    "typescript": "^5.1.6"
+  },
+  "dependencies": {
+    "php-parser": "^3.1.5",
+    "vis-network": "^9.1.6"
+  },
+  "author": "CTF Tools",
+  "license": "MIT"
+}
