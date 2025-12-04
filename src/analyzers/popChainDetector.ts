@@ -1429,7 +1429,7 @@ export class POPChainDetector {
             }
             
             // 关键修复：如果有 parenthesizedExpression 标志，说明是 ($this->prop)()，这是动态函数调用
-            if (node.parenthesizedExpression === true) {
+            if (node.parenthesizedExpression !== undefined && node.parenthesizedExpression === true) {
                 return true;
             }
             

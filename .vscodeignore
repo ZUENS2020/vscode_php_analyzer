@@ -1,0 +1,20 @@
+.vscode/**
+.vscode-test/**
+src/**
+.gitignore
+.yarnrc
+vsc-extension-quickstart.md
+**/tsconfig.json
+**/.eslintrc.json
+**/*.map
+**/*.ts
+node_modules/**
+test_*.js
+test_*.php
+debug_*.js
+php questions - 副本/**
+Untitled-1.php
+ctf_example.php
+test.php
+PAYLOAD_GENERATION_IMPROVEMENTS.md
+*.vsix
