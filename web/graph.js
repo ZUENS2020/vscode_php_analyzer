@@ -292,7 +292,12 @@ function handleNodeClick(node) {
 // Clear node selection
 function clearNodeSelection() {
     const detailsDiv = document.getElementById('nodeDetails');
-    detailsDiv.innerHTML = '<p class="text-muted">Click a node to see details</p>';
+    detailsDiv.textContent = '';
+    
+    const p = document.createElement('p');
+    p.className = 'text-muted';
+    p.textContent = 'Click a node to see details';
+    detailsDiv.appendChild(p);
 }
 
 // Filter nodes based on search
