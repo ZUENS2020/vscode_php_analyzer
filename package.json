@@ -164,6 +164,13 @@
           "type": "boolean",
           "default": true,
           "description": "Automatically show code graph after running Full Analysis"
+        },
+        "phpAnalyzer.graphServerPort": {
+          "type": "number",
+          "default": 3000,
+          "minimum": 1024,
+          "maximum": 65535,
+          "description": "Port for the interactive graph visualization server"
         }
       }
     }
@@ -179,12 +186,16 @@
   "devDependencies": {
     "@types/node": "^18.0.0",
     "@types/vscode": "^1.80.0",
+    "@types/express": "^4.17.17",
+    "@types/cors": "^2.8.13",
     "@typescript-eslint/eslint-plugin": "^6.0.0",
     "@typescript-eslint/parser": "^6.0.0",
     "eslint": "^8.0.0",
     "typescript": "^5.0.0"
   },
   "dependencies": {
-    "php-parser": "^3.1.5"
+    "php-parser": "^3.1.5",
+    "express": "^4.18.2",
+    "cors": "^2.8.5"
   }
 }

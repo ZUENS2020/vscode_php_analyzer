@@ -63,7 +63,7 @@ export class CodeGraphProvider implements vscode.WebviewViewProvider {
         }
     }
 
-    private buildCodeGraph(ast: any, document: vscode.TextDocument): CodeGraph {
+    public buildCodeGraph(ast: any, document: vscode.TextDocument): CodeGraph {
         const nodes: GraphNode[] = [];
         const edges: GraphEdge[] = [];
 
@@ -105,7 +105,7 @@ export class CodeGraphProvider implements vscode.WebviewViewProvider {
         return { nodes, edges };
     }
 
-    private buildInheritanceGraph(ast: any, document: vscode.TextDocument): CodeGraph {
+    public buildInheritanceGraph(ast: any, document: vscode.TextDocument): CodeGraph {
         const nodes: GraphNode[] = [];
         const edges: GraphEdge[] = [];
 
@@ -161,7 +161,7 @@ export class CodeGraphProvider implements vscode.WebviewViewProvider {
         return { nodes, edges };
     }
 
-    private buildDataFlowGraph(ast: any, document: vscode.TextDocument): CodeGraph {
+    public buildDataFlowGraph(ast: any, document: vscode.TextDocument): CodeGraph {
         const nodes: GraphNode[] = [];
         const edges: GraphEdge[] = [];
 
@@ -183,6 +183,37 @@ export class CodeGraphProvider implements vscode.WebviewViewProvider {
                 label: sink + '()',
                 type: 'sink'
             });
+        });
+
+        return { nodes, edges };
+    }
+
+    public buildAttackChainGraph(attackChains: any[]): CodeGraph {
+        const nodes: GraphNode[] = [];
+        const edges: GraphEdge[] = [];
+
+        // Build graph from attack chains
+        attackChains.forEach((chain, chainIndex) => {
+            if (chain.steps && Array.isArray(chain.steps)) {
+                chain.steps.forEach((step: any, stepIndex: number) => {
+                    const nodeId = `chain${chainIndex}_step${stepIndex}`;
+                    nodes.push({
+                        id: nodeId,
+                        label: step.type || step.description || 'Step',
+                        type: 'sink'
+                    });
+
+                    // Connect to previous step
+                    if (stepIndex > 0) {
+                        edges.push({
+                            source: `chain${chainIndex}_step${stepIndex - 1}`,
+                            target: nodeId,
+                            type: 'dataflow',
+                            label: 'leads to'
+                        });
+                    }
+                });
+            }
         });
 
         return { nodes, edges };

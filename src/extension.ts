@@ -10,9 +10,25 @@ import { VulnerabilityScanner } from './analyzers/vulnerabilityScanner';
 import { AnalysisResultsProvider } from './providers/analysisResultsProvider';
 import { CodeGraphProvider } from './providers/codeGraphProvider';
 import { PayloadGenerator } from './utils/payloadGenerator';
+import { GraphServer } from './server/graphServer';
+
+let graphServer: GraphServer | null = null;
 
 export function activate(context: vscode.ExtensionContext) {
     console.log('PHP Code Analyzer for CTF is now active');
+
+    // Start the graph server
+    const config = vscode.workspace.getConfiguration('phpAnalyzer');
+    const port = config.get<number>('graphServerPort') || 3000;
+    graphServer = new GraphServer(port);
+    
+    graphServer.start().then((success) => {
+        if (success) {
+            console.log(`Graph visualization server started on port ${port}`);
+        } else {
+            vscode.window.showWarningMessage(`Failed to start graph server on port ${port}. Graph visualization will not be available.`);
+        }
+    });
 
     // Initialize providers
     const analysisResultsProvider = new AnalysisResultsProvider();
@@ -21,7 +37,7 @@ export function activate(context: vscode.ExtensionContext) {
     // Register tree view
     vscode.window.registerTreeDataProvider('phpAnalysisResults', analysisResultsProvider);
     
-    // Register webview provider
+    // Register webview provider (keep for backward compatibility)
     vscode.window.registerWebviewViewProvider('phpCodeGraph', codeGraphProvider);
 
     // Register commands
@@ -266,7 +282,17 @@ async function fullSecurityAnalysis(provider: AnalysisResultsProvider, graphProv
 
             if (config.get('showGraphOnAnalysis')) {
                 progress.report({ increment: 95, message: 'Generating code graph...' });
-                await graphProvider.showCodeGraph(ast, docInfo.document);
+                
+                if (graphServer && graphServer.isRunning()) {
+                    const graph = graphProvider.buildCodeGraph(ast, docInfo.document);
+                    graphServer.updateGraphData('code', graph);
+                    
+                    const port = graphServer.getPort();
+                    const url = `http://localhost:${port}`;
+                    await vscode.env.openExternal(vscode.Uri.parse(url));
+                } else {
+                    await graphProvider.showCodeGraph(ast, docInfo.document);
+                }
             }
 
             progress.report({ increment: 100 });
@@ -295,8 +321,18 @@ async function analyzeAttackChains(provider: AnalysisResultsProvider, graphProvi
         
         provider.updateResults('Attack Chains', results);
         
-        // Highlight attack paths in graph
-        await graphProvider.highlightAttackPaths(results);
+        // Update graph server with attack chain graph
+        if (graphServer && graphServer.isRunning()) {
+            const graph = graphProvider.buildAttackChainGraph(results);
+            graphServer.updateGraphData('attackchain', graph);
+            
+            const port = graphServer.getPort();
+            const url = `http://localhost:${port}`;
+            await vscode.env.openExternal(vscode.Uri.parse(url));
+        } else {
+            // Fallback to webview
+            await graphProvider.highlightAttackPaths(results);
+        }
         
         vscode.window.showInformationMessage(`Found ${results.length} attack chains`);
     } catch (error: any) {
@@ -357,8 +393,23 @@ async function showCodeGraph(provider: CodeGraphProvider) {
     if (!docInfo) {return;}
 
     try {
+        if (!graphServer || !graphServer.isRunning()) {
+            vscode.window.showErrorMessage('Graph server is not running. Please restart the extension.');
+            return;
+        }
+
         const analyzer = new PHPAnalyzer(docInfo.text);
-        await provider.showCodeGraph(analyzer.getAST(), docInfo.document);
+        const graph = provider.buildCodeGraph(analyzer.getAST(), docInfo.document);
+        
+        // Update server with graph data
+        graphServer.updateGraphData('code', graph);
+        
+        // Open browser
+        const port = graphServer.getPort();
+        const url = `http://localhost:${port}`;
+        await vscode.env.openExternal(vscode.Uri.parse(url));
+        
+        vscode.window.showInformationMessage('Code graph opened in browser');
     } catch (error: any) {
         vscode.window.showErrorMessage(`Error showing code graph: ${error.message}`);
     }
@@ -369,8 +420,23 @@ async function showInheritanceGraph(provider: CodeGraphProvider) {
     if (!docInfo) {return;}
 
     try {
+        if (!graphServer || !graphServer.isRunning()) {
+            vscode.window.showErrorMessage('Graph server is not running. Please restart the extension.');
+            return;
+        }
+
         const analyzer = new PHPAnalyzer(docInfo.text);
-        await provider.showInheritanceGraph(analyzer.getAST(), docInfo.document);
+        const graph = provider.buildInheritanceGraph(analyzer.getAST(), docInfo.document);
+        
+        // Update server with graph data
+        graphServer.updateGraphData('inheritance', graph);
+        
+        // Open browser
+        const port = graphServer.getPort();
+        const url = `http://localhost:${port}`;
+        await vscode.env.openExternal(vscode.Uri.parse(url));
+        
+        vscode.window.showInformationMessage('Inheritance graph opened in browser');
     } catch (error: any) {
         vscode.window.showErrorMessage(`Error showing inheritance graph: ${error.message}`);
     }
@@ -381,11 +447,31 @@ async function showDataFlowGraph(provider: CodeGraphProvider) {
     if (!docInfo) {return;}
 
     try {
+        if (!graphServer || !graphServer.isRunning()) {
+            vscode.window.showErrorMessage('Graph server is not running. Please restart the extension.');
+            return;
+        }
+
         const analyzer = new PHPAnalyzer(docInfo.text);
-        await provider.showDataFlowGraph(analyzer.getAST(), docInfo.document);
+        const graph = provider.buildDataFlowGraph(analyzer.getAST(), docInfo.document);
+        
+        // Update server with graph data
+        graphServer.updateGraphData('dataflow', graph);
+        
+        // Open browser
+        const port = graphServer.getPort();
+        const url = `http://localhost:${port}`;
+        await vscode.env.openExternal(vscode.Uri.parse(url));
+        
+        vscode.window.showInformationMessage('Data flow graph opened in browser');
     } catch (error: any) {
         vscode.window.showErrorMessage(`Error showing data flow graph: ${error.message}`);
     }
 }
 
-export function deactivate() {}
+export function deactivate() {
+    if (graphServer) {
+        graphServer.stop();
+        graphServer = null;
+    }
+}
