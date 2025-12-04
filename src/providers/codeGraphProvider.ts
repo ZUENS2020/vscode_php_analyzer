@@ -1,5 +1,9 @@
 import * as vscode from 'vscode';
 import { CodeGraph, GraphNode, GraphEdge, DataSource, DataSink, Entity, Relationship, DataFlowPath, ObjectRelation, PropertyAccess, MethodCall, CallRelation, Condition } from '../types';
+import { DataFlowAnalyzer } from '../analyzers/dataFlowAnalyzer';
+import { ObjectRelationAnalyzer } from '../analyzers/objectRelationAnalyzer';
+import { CallGraphAnalyzer } from '../analyzers/callGraphAnalyzer';
+import { ConditionalPathAnalyzer } from '../analyzers/conditionalPathAnalyzer';
 
 export class CodeGraphProvider implements vscode.WebviewViewProvider {
     private _view?: vscode.WebviewView;
@@ -164,12 +168,6 @@ export class CodeGraphProvider implements vscode.WebviewViewProvider {
     public buildDataFlowGraph(ast: any, document: vscode.TextDocument): CodeGraph {
         const nodes: GraphNode[] = [];
         const edges: GraphEdge[] = [];
-
-        // Import the comprehensive analyzers
-        const { DataFlowAnalyzer } = require('../analyzers/dataFlowAnalyzer');
-        const { ObjectRelationAnalyzer } = require('../analyzers/objectRelationAnalyzer');
-        const { CallGraphAnalyzer } = require('../analyzers/callGraphAnalyzer');
-        const { ConditionalPathAnalyzer } = require('../analyzers/conditionalPathAnalyzer');
 
         try {
             // Run data flow analysis

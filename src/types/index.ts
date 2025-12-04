@@ -113,7 +113,24 @@ export interface GraphNode {
     id: string;
     label: string;
     type: 'class' | 'method' | 'property' | 'magic' | 'serialization' | 'sink' | 'source';
-    metadata?: any;
+    metadata?: GraphNodeMetadata;
+}
+
+export interface GraphNodeMetadata {
+    sourceType?: string;
+    sinkType?: string;
+    isTainted?: boolean;
+    line?: number;
+    column?: number;
+    value?: string;
+    severity?: 'critical' | 'high' | 'medium' | 'low';
+    className?: string;
+    isWrite?: boolean;
+    arguments?: Entity[];
+    isFunction?: boolean;
+    conditionType?: string;
+    expression?: string;
+    branches?: number;
 }
 
 export interface GraphEdge {
@@ -121,7 +138,16 @@ export interface GraphEdge {
     target: string;
     type: 'contains' | 'calls' | 'extends' | 'implements' | 'dataflow';
     label?: string;
-    metadata?: any;
+    metadata?: GraphEdgeMetadata;
+}
+
+export interface GraphEdgeMetadata {
+    isTainted?: boolean;
+    conditions?: Condition[];
+    vulnerabilityType?: string;
+    severity?: 'critical' | 'high' | 'medium' | 'low';
+    isRecursive?: boolean;
+    arguments?: Entity[];
 }
 
 export interface CodeGraph {
