@@ -101,6 +101,31 @@ export class GraphServer {
             res.json({ success: true, fileHash });
         });
 
+        // Enhanced data flow analysis endpoint
+        this.app.post('/api/analysis/dataflow', (req, res) => {
+            const { filePath, analysis } = req.body;
+            
+            if (!filePath) {
+                res.status(400).json({ error: 'Missing filePath' });
+                return;
+            }
+            
+            // Return current data flow graph data
+            if (this.currentGraphData.dataflow) {
+                res.json({
+                    success: true,
+                    filePath: filePath,
+                    analysis: analysis || 'comprehensive',
+                    data: this.currentGraphData.dataflow
+                });
+            } else {
+                res.status(404).json({ 
+                    error: 'No data flow analysis available. Run analysis in VS Code first.',
+                    filePath: filePath
+                });
+            }
+        });
+
         // Serve main page
         // Note: Rate limiting is not required as this server only listens on localhost
         // and is exclusively for use by the VS Code extension's graph visualization
