@@ -489,6 +489,100 @@ function showPOPChainDetails(chains) {
             body.appendChild(dataFlowDiv);
         }
         
+        // === 新增: 参数来源信息 ===
+        if (chain.paramName || chain.paramSource) {
+            const paramDiv = document.createElement('div');
+            paramDiv.className = 'mt-2 p-2 rounded';
+            paramDiv.style.backgroundColor = '#0f2340';
+            paramDiv.style.border = '1px solid #2196F3';
+            
+            let paramHtml = '<div class="text-info small fw-bold mb-1">📥 参数信息:</div>';
+            if (chain.paramSource) {
+                paramHtml += `<div><span class="text-muted">来源:</span> <code class="text-warning">${chain.paramSource}</code></div>`;
+            }
+            if (chain.paramName) {
+                paramHtml += `<div><span class="text-muted">参数名:</span> <code class="text-info">${chain.paramName}</code></div>`;
+            }
+            // 构造完整利用 URL 提示
+            if (chain.paramSource && chain.paramName) {
+                paramHtml += `<div class="mt-1 small text-success">💡 利用: <code>?${chain.paramName}=PAYLOAD</code></div>`;
+            }
+            
+            paramDiv.innerHTML = paramHtml;
+            body.appendChild(paramDiv);
+        }
+        
+        // === 新增: __wakeup 绕过提示 ===
+        if (chain.bypassWakeup) {
+            const bypassDiv = document.createElement('div');
+            bypassDiv.className = 'mt-2 p-2 rounded';
+            bypassDiv.style.backgroundColor = '#402020';
+            bypassDiv.style.border = '1px solid #ff6b6b';
+            
+            bypassDiv.innerHTML = `
+                <div class="text-warning small fw-bold mb-1">⚠️ 需要绕过 __wakeup:</div>
+                <div class="small text-light">CVE-2016-7124 (PHP < 7.4.26)</div>
+                <div class="small text-muted">修改序列化字符串中的属性数量</div>
+                <code class="small text-info">O:N:"Class":X:{...}</code> → <code class="small text-success">O:N:"Class":X+1:{...}</code>
+            `;
+            body.appendChild(bypassDiv);
+        }
+        
+        // === 新增: 正则过滤信息 ===
+        if (chain.regexFilters && chain.regexFilters.length > 0) {
+            const filterDiv = document.createElement('div');
+            filterDiv.className = 'mt-2 p-2 rounded';
+            filterDiv.style.backgroundColor = '#402000';
+            filterDiv.style.border = '1px solid #ff9800';
+            
+            let filterHtml = '<div class="text-warning small fw-bold mb-1">🛡️ 检测到的过滤器:</div>';
+            chain.regexFilters.forEach((filter, idx) => {
+                filterHtml += `<div class="mb-1">`;
+                filterHtml += `<code class="small text-danger">${escapeHtml(filter.pattern)}</code>`;
+                if (filter.blockedKeywords && filter.blockedKeywords.length > 0) {
+                    filterHtml += `<div class="ms-2 small text-muted">阻止: ${filter.blockedKeywords.join(', ')}</div>`;
+                }
+                filterHtml += `</div>`;
+            });
+            
+            filterDiv.innerHTML = filterHtml;
+            body.appendChild(filterDiv);
+        }
+        
+        // === 新增: 绕过建议 ===
+        if (chain.bypassHints && chain.bypassHints.length > 0) {
+            const hintsDiv = document.createElement('div');
+            hintsDiv.className = 'mt-2 p-2 rounded';
+            hintsDiv.style.backgroundColor = '#003320';
+            hintsDiv.style.border = '1px solid #4CAF50';
+            
+            let hintsHtml = '<div class="text-success small fw-bold mb-1">💡 绕过建议:</div>';
+            chain.bypassHints.forEach(hint => {
+                hintsHtml += `<div class="small text-light mb-1">• ${hint}</div>`;
+            });
+            
+            hintsDiv.innerHTML = hintsHtml;
+            body.appendChild(hintsDiv);
+        }
+        
+        // === 新增: 漏洞类型标签 ===
+        if (chain.vulnType) {
+            const vulnTypes = {
+                'pop_chain': { label: 'POP链', color: 'danger' },
+                'property_injection': { label: '属性注入', color: 'warning' },
+                'dynamic_rce': { label: '动态RCE', color: 'danger' },
+                'file_read': { label: '文件读取', color: 'info' },
+                'file_write': { label: '文件写入', color: 'warning' }
+            };
+            
+            const vulnInfo = vulnTypes[chain.vulnType] || { label: chain.vulnType, color: 'secondary' };
+            
+            const vulnBadge = document.createElement('div');
+            vulnBadge.className = 'mt-2 text-center';
+            vulnBadge.innerHTML = `<span class="badge bg-${vulnInfo.color} px-3 py-2">${vulnInfo.label}</span>`;
+            body.appendChild(vulnBadge);
+        }
+        
         // Buttons
         const btnGroup = document.createElement('div');
         btnGroup.className = 'd-flex gap-2 mt-3';
@@ -509,11 +603,32 @@ function showPOPChainDetails(chains) {
         };
         btnGroup.appendChild(highlightChainBtn);
         
+        // 新增: 复制利用URL按钮
+        if (chain.paramName) {
+            const copyUrlBtn = document.createElement('button');
+            copyUrlBtn.className = 'btn btn-outline-success btn-sm';
+            copyUrlBtn.innerHTML = '🔗 复制URL';
+            copyUrlBtn.onclick = function() {
+                const url = `?${chain.paramName}=${encodeURIComponent(chain.payload || '')}`;
+                navigator.clipboard.writeText(url).then(() => {
+                    showNotification('利用URL已复制!', 'success');
+                });
+            };
+            btnGroup.appendChild(copyUrlBtn);
+        }
+        
         body.appendChild(btnGroup);
         
         chainDiv.appendChild(body);
         detailsDiv.appendChild(chainDiv);
     }
+}
+
+// HTML 转义函数
+function escapeHtml(text) {
+    const div = document.createElement('div');
+    div.textContent = text;
+    return div.innerHTML;
 }
 
 // Highlight entire chain with new structure
@@ -694,60 +809,241 @@ function handleNodeClick(node) {
     // Clear previous content
     detailsDiv.innerHTML = '';
     
-    // Create elements safely
+    // Create main container
+    const container = document.createElement('div');
+    container.className = 'node-details-container';
+    
+    // Title with icon based on type
+    const typeIcons = {
+        'class': '📦',
+        'method': '⚙️',
+        'magic': '✨',
+        'property': '🏷️',
+        'source': '📥',
+        'sink': '💀',
+        'entry': '🎯',
+        'chain': '⛓️'
+    };
+    
     const h6 = document.createElement('h6');
-    h6.textContent = data.label;
-    detailsDiv.appendChild(h6);
+    h6.className = 'text-warning mb-2';
+    h6.innerHTML = `${typeIcons[data.type] || '📍'} ${data.label}`;
+    container.appendChild(h6);
     
+    // Type badge with color
     const typeBadge = document.createElement('p');
+    const badgeColors = {
+        'class': 'bg-primary',
+        'method': 'bg-success',
+        'magic': 'bg-danger',
+        'property': 'bg-info',
+        'source': 'bg-warning text-dark',
+        'sink': 'bg-danger',
+        'entry': 'bg-success',
+        'chain': 'bg-warning text-dark'
+    };
     const badge = document.createElement('span');
-    badge.className = 'badge bg-primary';
-    badge.textContent = data.type;
+    badge.className = `badge ${badgeColors[data.type] || 'bg-secondary'}`;
+    badge.textContent = data.type?.toUpperCase() || 'UNKNOWN';
     typeBadge.appendChild(badge);
-    detailsDiv.appendChild(typeBadge);
+    container.appendChild(typeBadge);
     
-    const idPara = document.createElement('p');
-    const idStrong = document.createElement('strong');
-    idStrong.textContent = 'ID: ';
-    idPara.appendChild(idStrong);
-    idPara.appendChild(document.createTextNode(data.id));
-    detailsDiv.appendChild(idPara);
+    // === Enhanced details based on node type ===
     
-    // Add line number and highlight button if available
-    if (data.metadata && data.metadata.line) {
-        const linePara = document.createElement('p');
-        const lineStrong = document.createElement('strong');
-        lineStrong.textContent = 'Line: ';
-        linePara.appendChild(lineStrong);
-        linePara.appendChild(document.createTextNode(data.metadata.line));
-        detailsDiv.appendChild(linePara);
+    // For class nodes
+    if (data.type === 'class' && data.metadata) {
+        const classInfo = document.createElement('div');
+        classInfo.className = 'bg-dark p-2 rounded mb-2';
+        classInfo.style.border = '1px solid #3a3a5c';
         
-        // Add highlight button
+        let classHtml = '<div class="text-info small fw-bold mb-1">📊 类信息:</div>';
+        
+        if (data.metadata.extends) {
+            classHtml += `<div><span class="text-warning">继承:</span> <code class="text-light">${data.metadata.extends}</code></div>`;
+        }
+        if (data.metadata.implements && data.metadata.implements.length > 0) {
+            classHtml += `<div><span class="text-success">实现:</span> <code class="text-light">${data.metadata.implements.join(', ')}</code></div>`;
+        }
+        if (data.metadata.properties) {
+            classHtml += `<div><span class="text-info">属性数:</span> <span class="text-light">${data.metadata.properties}</span></div>`;
+        }
+        if (data.metadata.methods) {
+            classHtml += `<div><span class="text-info">方法数:</span> <span class="text-light">${data.metadata.methods}</span></div>`;
+        }
+        if (data.metadata.hasMagicMethods) {
+            classHtml += `<div class="text-danger mt-1">⚠️ 包含魔术方法</div>`;
+        }
+        
+        classInfo.innerHTML = classHtml;
+        container.appendChild(classInfo);
+    }
+    
+    // For method nodes
+    if ((data.type === 'method' || data.type === 'magic') && data.metadata) {
+        const methodInfo = document.createElement('div');
+        methodInfo.className = 'bg-dark p-2 rounded mb-2';
+        methodInfo.style.border = '1px solid #3a3a5c';
+        
+        let methodHtml = '<div class="text-info small fw-bold mb-1">⚙️ 方法信息:</div>';
+        
+        if (data.metadata.visibility) {
+            const visColors = { 'public': 'text-success', 'protected': 'text-warning', 'private': 'text-danger' };
+            methodHtml += `<div><span class="text-muted">可见性:</span> <span class="${visColors[data.metadata.visibility] || 'text-light'}">${data.metadata.visibility}</span></div>`;
+        }
+        if (data.metadata.parameters && data.metadata.parameters.length > 0) {
+            methodHtml += `<div><span class="text-muted">参数:</span> <code class="text-info">(${data.metadata.parameters.join(', ')})</code></div>`;
+        }
+        if (data.metadata.returns) {
+            methodHtml += `<div><span class="text-muted">返回:</span> <code class="text-light">${data.metadata.returns}</code></div>`;
+        }
+        if (data.metadata.dangerousCalls && data.metadata.dangerousCalls.length > 0) {
+            methodHtml += `<div class="mt-1 text-danger">🔥 危险调用:</div>`;
+            data.metadata.dangerousCalls.forEach(call => {
+                methodHtml += `<div class="ms-2"><code class="text-danger">${call}</code></div>`;
+            });
+        }
+        if (data.metadata.triggers && data.metadata.triggers.length > 0) {
+            methodHtml += `<div class="mt-1 text-warning">⚡ 触发器:</div>`;
+            data.metadata.triggers.forEach(trigger => {
+                methodHtml += `<div class="ms-2 small text-muted">${trigger}</div>`;
+            });
+        }
+        
+        methodInfo.innerHTML = methodHtml;
+        container.appendChild(methodInfo);
+    }
+    
+    // For sink nodes
+    if (data.type === 'sink' && data.metadata) {
+        const sinkInfo = document.createElement('div');
+        sinkInfo.className = 'bg-danger bg-opacity-25 p-2 rounded mb-2';
+        sinkInfo.style.border = '1px solid #dc3545';
+        
+        let sinkHtml = '<div class="text-danger small fw-bold mb-1">💀 危险操作:</div>';
+        
+        if (data.metadata.function) {
+            sinkHtml += `<div><span class="text-muted">函数:</span> <code class="text-danger">${data.metadata.function}</code></div>`;
+        }
+        if (data.metadata.riskLevel) {
+            const riskColors = { 'critical': 'text-danger', 'high': 'text-warning', 'medium': 'text-info' };
+            sinkHtml += `<div><span class="text-muted">风险等级:</span> <span class="${riskColors[data.metadata.riskLevel] || 'text-light'}">${data.metadata.riskLevel.toUpperCase()}</span></div>`;
+        }
+        if (data.metadata.exploitType) {
+            sinkHtml += `<div><span class="text-muted">利用类型:</span> <span class="text-warning">${data.metadata.exploitType}</span></div>`;
+        }
+        
+        sinkInfo.innerHTML = sinkHtml;
+        container.appendChild(sinkInfo);
+    }
+    
+    // For entry nodes (unserialize)
+    if (data.type === 'entry' && data.metadata) {
+        const entryInfo = document.createElement('div');
+        entryInfo.className = 'bg-success bg-opacity-25 p-2 rounded mb-2';
+        entryInfo.style.border = '1px solid #28a745';
+        
+        let entryHtml = '<div class="text-success small fw-bold mb-1">🎯 入口点信息:</div>';
+        
+        if (data.metadata.paramSource) {
+            entryHtml += `<div><span class="text-muted">参数来源:</span> <code class="text-info">${data.metadata.paramSource}</code></div>`;
+        }
+        if (data.metadata.paramName) {
+            entryHtml += `<div><span class="text-muted">参数名:</span> <code class="text-warning">${data.metadata.paramName}</code></div>`;
+        }
+        if (data.metadata.isBase64) {
+            entryHtml += `<div class="text-info mt-1">📦 需要 Base64 编码</div>`;
+        }
+        
+        entryInfo.innerHTML = entryHtml;
+        container.appendChild(entryInfo);
+    }
+    
+    // Line number with highlight button
+    if (data.metadata && data.metadata.line) {
+        const lineDiv = document.createElement('div');
+        lineDiv.className = 'd-flex justify-content-between align-items-center mt-2';
+        
+        const linePara = document.createElement('span');
+        linePara.innerHTML = `<strong class="text-muted">📍 Line:</strong> <span class="text-light">${data.metadata.line}</span>`;
+        lineDiv.appendChild(linePara);
+        
         const highlightBtn = document.createElement('button');
-        highlightBtn.className = 'btn btn-warning btn-sm mt-2';
-        highlightBtn.innerHTML = '🎯 Highlight in VS Code';
+        highlightBtn.className = 'btn btn-warning btn-sm';
+        highlightBtn.innerHTML = '🎯 定位';
         highlightBtn.onclick = function() {
             highlightInVSCode(data.metadata.line, data.metadata.column || 0);
         };
-        detailsDiv.appendChild(highlightBtn);
+        lineDiv.appendChild(highlightBtn);
+        
+        container.appendChild(lineDiv);
     }
     
-    // Add metadata if present
-    if (data.metadata) {
-        const metaPara = document.createElement('p');
-        metaPara.className = 'mt-2';
-        const metaStrong = document.createElement('strong');
-        metaStrong.textContent = 'Additional Info: ';
-        metaPara.appendChild(metaStrong);
-        
-        const metaPre = document.createElement('pre');
-        metaPre.style.fontSize = '12px';
-        metaPre.style.maxHeight = '200px';
-        metaPre.style.overflow = 'auto';
-        metaPre.textContent = JSON.stringify(data.metadata, null, 2);
-        metaPara.appendChild(metaPre);
-        detailsDiv.appendChild(metaPara);
+    // Connected nodes info
+    const connectedInfo = document.createElement('div');
+    connectedInfo.className = 'mt-3 p-2 bg-dark rounded';
+    connectedInfo.style.border = '1px solid #3a3a5c';
+    
+    const incomers = node.incomers('edge');
+    const outgoers = node.outgoers('edge');
+    
+    let connHtml = '<div class="text-info small fw-bold mb-1">🔗 连接信息:</div>';
+    connHtml += `<div><span class="text-success">← 入边:</span> <span class="text-light">${incomers.length}</span></div>`;
+    connHtml += `<div><span class="text-warning">→ 出边:</span> <span class="text-light">${outgoers.length}</span></div>`;
+    
+    if (incomers.length > 0) {
+        connHtml += '<div class="mt-1 small text-muted">来自:</div>';
+        incomers.slice(0, 5).forEach(edge => {
+            const source = edge.source();
+            connHtml += `<div class="ms-2 small"><code class="text-info">${source.data('label')}</code> <span class="text-muted">(${edge.data('type')})</span></div>`;
+        });
+        if (incomers.length > 5) {
+            connHtml += `<div class="ms-2 small text-muted">... 还有 ${incomers.length - 5} 个</div>`;
+        }
     }
+    
+    if (outgoers.length > 0) {
+        connHtml += '<div class="mt-1 small text-muted">到达:</div>';
+        outgoers.slice(0, 5).forEach(edge => {
+            const target = edge.target();
+            connHtml += `<div class="ms-2 small"><code class="text-warning">${target.data('label')}</code> <span class="text-muted">(${edge.data('type')})</span></div>`;
+        });
+        if (outgoers.length > 5) {
+            connHtml += `<div class="ms-2 small text-muted">... 还有 ${outgoers.length - 5} 个</div>`;
+        }
+    }
+    
+    connectedInfo.innerHTML = connHtml;
+    container.appendChild(connectedInfo);
+    
+    // Action buttons
+    const btnGroup = document.createElement('div');
+    btnGroup.className = 'd-flex gap-2 mt-3';
+    
+    const focusBtn = document.createElement('button');
+    focusBtn.className = 'btn btn-outline-info btn-sm flex-grow-1';
+    focusBtn.innerHTML = '🔍 聚焦';
+    focusBtn.onclick = function() {
+        cy.animate({
+            center: { eles: node },
+            zoom: 2,
+            duration: 500
+        });
+    };
+    btnGroup.appendChild(focusBtn);
+    
+    const neighborsBtn = document.createElement('button');
+    neighborsBtn.className = 'btn btn-outline-warning btn-sm flex-grow-1';
+    neighborsBtn.innerHTML = '👁️ 邻居';
+    neighborsBtn.onclick = function() {
+        cy.elements().addClass('filtered');
+        node.removeClass('filtered');
+        node.neighborhood().removeClass('filtered');
+    };
+    btnGroup.appendChild(neighborsBtn);
+    
+    container.appendChild(btnGroup);
+    
+    detailsDiv.appendChild(container);
 }
 
 // Clear node selection
@@ -1057,9 +1353,16 @@ function getGraphStats() {
     const stats = {
         nodes: cy.nodes().length,
         edges: cy.edges().length,
+        classes: cy.nodes().filter(n => n.data('type') === 'class').length,
+        methods: cy.nodes().filter(n => n.data('type') === 'method').length,
+        magicMethods: cy.nodes().filter(n => n.data('type') === 'magic').length,
+        properties: cy.nodes().filter(n => n.data('type') === 'property').length,
         sources: cy.nodes().filter(n => n.data('type') === 'source').length,
         sinks: cy.nodes().filter(n => n.data('type') === 'sink').length,
+        entryPoints: cy.nodes().filter(n => n.data('type') === 'entry').length,
+        chainNodes: cy.nodes().filter(n => n.data('type') === 'chain').length,
         taintedNodes: cy.nodes().filter(n => n.data('metadata')?.isTainted === true).length,
+        edgeTypes: {},
         vulnerabilities: {
             critical: 0,
             high: 0,
@@ -1068,8 +1371,11 @@ function getGraphStats() {
         }
     };
     
-    // Count vulnerabilities by severity
+    // Count edges by type
     cy.edges().forEach(edge => {
+        const type = edge.data('type') || 'unknown';
+        stats.edgeTypes[type] = (stats.edgeTypes[type] || 0) + 1;
+        
         const metadata = edge.data('metadata');
         if (metadata && metadata.severity) {
             stats.vulnerabilities[metadata.severity] = (stats.vulnerabilities[metadata.severity] || 0) + 1;
@@ -1088,32 +1394,156 @@ function updateStatsDisplay() {
     
     statsDiv.innerHTML = '';
     
-    const title = document.createElement('h6');
-    title.textContent = 'Graph Statistics';
-    statsDiv.appendChild(title);
+    // === 节点统计 ===
+    const nodeSection = document.createElement('div');
+    nodeSection.className = 'mb-3';
+    nodeSection.innerHTML = `
+        <div class="text-info small fw-bold mb-2">📊 节点统计</div>
+        <div class="row g-1">
+            <div class="col-6">
+                <div class="bg-dark p-2 rounded text-center">
+                    <div class="text-warning fw-bold">${stats.nodes}</div>
+                    <div class="small text-muted">总节点</div>
+                </div>
+            </div>
+            <div class="col-6">
+                <div class="bg-dark p-2 rounded text-center">
+                    <div class="text-info fw-bold">${stats.edges}</div>
+                    <div class="small text-muted">总边数</div>
+                </div>
+            </div>
+        </div>
+    `;
+    statsDiv.appendChild(nodeSection);
     
-    const list = document.createElement('ul');
-    list.className = 'list-unstyled';
+    // === 类型分布 ===
+    const typeSection = document.createElement('div');
+    typeSection.className = 'mb-3 bg-dark p-2 rounded';
+    typeSection.style.border = '1px solid #3a3a5c';
     
-    const items = [
-        `Nodes: ${stats.nodes}`,
-        `Edges: ${stats.edges}`,
-        `Sources: ${stats.sources}`,
-        `Sinks: ${stats.sinks}`,
-        `Tainted: ${stats.taintedNodes}`,
-        `Critical: ${stats.vulnerabilities.critical}`,
-        `High: ${stats.vulnerabilities.high}`,
-        `Medium: ${stats.vulnerabilities.medium}`,
-        `Low: ${stats.vulnerabilities.low}`
+    let typeHtml = '<div class="text-info small fw-bold mb-2">📦 类型分布</div>';
+    
+    const typeItems = [
+        { label: '类', value: stats.classes, color: 'primary', icon: '📦' },
+        { label: '方法', value: stats.methods, color: 'success', icon: '⚙️' },
+        { label: '魔术方法', value: stats.magicMethods, color: 'danger', icon: '✨' },
+        { label: '属性', value: stats.properties, color: 'info', icon: '🏷️' },
+        { label: '入口点', value: stats.entryPoints, color: 'success', icon: '🎯' },
+        { label: '危险点', value: stats.sinks, color: 'danger', icon: '💀' }
     ];
     
-    items.forEach(item => {
-        const li = document.createElement('li');
-        li.textContent = item;
-        list.appendChild(li);
+    typeItems.forEach(item => {
+        if (item.value > 0) {
+            typeHtml += `
+                <div class="d-flex justify-content-between align-items-center mb-1">
+                    <span class="small">${item.icon} ${item.label}</span>
+                    <span class="badge bg-${item.color}">${item.value}</span>
+                </div>
+            `;
+        }
     });
     
-    statsDiv.appendChild(list);
+    typeSection.innerHTML = typeHtml;
+    statsDiv.appendChild(typeSection);
+    
+    // === 边类型统计 ===
+    if (Object.keys(stats.edgeTypes).length > 0) {
+        const edgeSection = document.createElement('div');
+        edgeSection.className = 'mb-3 bg-dark p-2 rounded';
+        edgeSection.style.border = '1px solid #3a3a5c';
+        
+        let edgeHtml = '<div class="text-info small fw-bold mb-2">🔗 边类型</div>';
+        
+        const edgeColors = {
+            'extends': 'danger',
+            'implements': 'success',
+            'contains': 'secondary',
+            'calls': 'primary',
+            'triggers': 'warning',
+            'dataflow': 'info',
+            'invokes': 'danger',
+            'property_flow': 'info'
+        };
+        
+        Object.entries(stats.edgeTypes).forEach(([type, count]) => {
+            const color = edgeColors[type] || 'secondary';
+            edgeHtml += `
+                <div class="d-flex justify-content-between align-items-center mb-1">
+                    <span class="small text-light">${type}</span>
+                    <span class="badge bg-${color}">${count}</span>
+                </div>
+            `;
+        });
+        
+        edgeSection.innerHTML = edgeHtml;
+        statsDiv.appendChild(edgeSection);
+    }
+    
+    // === 安全统计 ===
+    const securitySection = document.createElement('div');
+    securitySection.className = 'mb-3 bg-dark p-2 rounded';
+    securitySection.style.border = '1px solid #dc3545';
+    
+    const totalVulns = stats.vulnerabilities.critical + stats.vulnerabilities.high + 
+                       stats.vulnerabilities.medium + stats.vulnerabilities.low;
+    
+    let secHtml = '<div class="text-danger small fw-bold mb-2">🔒 安全分析</div>';
+    
+    if (totalVulns > 0 || stats.sinks > 0 || stats.entryPoints > 0) {
+        secHtml += `
+            <div class="d-flex justify-content-between mb-1">
+                <span class="small text-light">入口点</span>
+                <span class="badge bg-success">${stats.entryPoints}</span>
+            </div>
+            <div class="d-flex justify-content-between mb-1">
+                <span class="small text-light">危险调用</span>
+                <span class="badge bg-danger">${stats.sinks}</span>
+            </div>
+        `;
+        
+        if (stats.vulnerabilities.critical > 0) {
+            secHtml += `
+                <div class="d-flex justify-content-between mb-1">
+                    <span class="small text-danger">🔴 严重</span>
+                    <span class="badge bg-danger">${stats.vulnerabilities.critical}</span>
+                </div>
+            `;
+        }
+        if (stats.vulnerabilities.high > 0) {
+            secHtml += `
+                <div class="d-flex justify-content-between mb-1">
+                    <span class="small text-warning">🟠 高危</span>
+                    <span class="badge bg-warning text-dark">${stats.vulnerabilities.high}</span>
+                </div>
+            `;
+        }
+        
+        // 风险评估
+        let riskLevel = '低';
+        let riskColor = 'success';
+        if (stats.vulnerabilities.critical > 0 || (stats.entryPoints > 0 && stats.sinks > 0)) {
+            riskLevel = '严重';
+            riskColor = 'danger';
+        } else if (stats.vulnerabilities.high > 0 || stats.sinks > 0) {
+            riskLevel = '高';
+            riskColor = 'warning';
+        } else if (stats.magicMethods > 0) {
+            riskLevel = '中';
+            riskColor = 'info';
+        }
+        
+        secHtml += `
+            <div class="mt-2 p-2 rounded text-center" style="background-color: ${riskColor === 'danger' ? '#4d0f0f' : riskColor === 'warning' ? '#4d3f0f' : '#0f4d0f'};">
+                <span class="small text-muted">综合风险:</span>
+                <span class="badge bg-${riskColor} ms-1">${riskLevel}</span>
+            </div>
+        `;
+    } else {
+        secHtml += '<div class="small text-muted">暂无安全问题</div>';
+    }
+    
+    securitySection.innerHTML = secHtml;
+    statsDiv.appendChild(securitySection);
 }
 
 // Initialize on page load

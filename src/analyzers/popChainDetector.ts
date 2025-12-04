@@ -246,6 +246,106 @@ export class POPChainDetector {
     }
 
     /**
+     * 检测类中属性的使用方式
+     * 返回: { callable: Set<属性名>, asObject: Set<属性名> }
+     * - callable: 被用作函数调用 ($this->prop)() 或 $var() 其中 $var = $this->prop
+     * - asObject: 被用作对象访问其属性 $this->prop->xxx 或 $var->xxx
+     */
+    private getPropertyUsageTypes(className: string): { callable: Set<string>, asObject: Set<string> } {
+        const callableProps = new Set<string>();
+        const objectProps = new Set<string>();
+        const classInfo = this.classMap.get(className);
+        if (!classInfo) return { callable: callableProps, asObject: objectProps };
+
+        // 遍历类的所有方法
+        for (const method of classInfo.methods) {
+            if (!method.node?.body?.children) continue;
+            
+            // 追踪变量到属性的映射
+            const varToProperty = new Map<string, string>();
+            
+            const analyzeNode = (node: any) => {
+                if (!node) return;
+
+                // 追踪赋值: $var = $this->prop
+                if (node.kind === 'assign' || node.kind === 'expressionstatement') {
+                    const assignNode = node.kind === 'expressionstatement' ? node.expression : node;
+                    if (assignNode?.kind === 'assign') {
+                        const left = assignNode.left;
+                        const right = assignNode.right;
+                        if (left?.kind === 'variable' && right?.kind === 'propertylookup') {
+                            if (right.what?.kind === 'variable' && right.what?.name === 'this') {
+                                const propName = right.offset?.name;
+                                if (propName) {
+                                    varToProperty.set(left.name, propName);
+                                }
+                            }
+                        }
+                    }
+                }
+
+                // 检测 ($this->prop)() 模式 - callable
+                if (node.kind === 'call') {
+                    const what = node.what;
+                    // 直接调用: ($this->prop)(...)
+                    if (what?.kind === 'propertylookup') {
+                        if (what.what?.kind === 'variable' && what.what?.name === 'this') {
+                            const propName = what.offset?.name;
+                            if (propName) {
+                                callableProps.add(propName);
+                            }
+                        }
+                    }
+                    // 变量调用: $var(...) 其中 $var = $this->prop
+                    if (what?.kind === 'variable') {
+                        const varName = what.name;
+                        const propName = varToProperty.get(varName);
+                        if (propName) {
+                            callableProps.add(propName);
+                        }
+                    }
+                }
+
+                // 检测 $this->prop->xxx 或 $var->xxx 模式 - asObject
+                if (node.kind === 'propertylookup') {
+                    const what = node.what;
+                    // 直接访问: $this->prop->xxx
+                    if (what?.kind === 'propertylookup') {
+                        if (what.what?.kind === 'variable' && what.what?.name === 'this') {
+                            const propName = what.offset?.name;
+                            if (propName) {
+                                objectProps.add(propName);
+                            }
+                        }
+                    }
+                    // 变量访问: $var->xxx 其中 $var = $this->prop
+                    if (what?.kind === 'variable') {
+                        const varName = what.name;
+                        const propName = varToProperty.get(varName);
+                        if (propName) {
+                            objectProps.add(propName);
+                        }
+                    }
+                }
+
+                // 递归检查子节点
+                for (const key of Object.keys(node)) {
+                    const child = node[key];
+                    if (Array.isArray(child)) {
+                        child.forEach(c => analyzeNode(c));
+                    } else if (child && typeof child === 'object' && child.kind) {
+                        analyzeNode(child);
+                    }
+                }
+            };
+
+            method.node.body.children.forEach((stmt: any) => analyzeNode(stmt));
+        }
+
+        return { callable: callableProps, asObject: objectProps };
+    }
+
+    /**
      * 主入口 - 检测POP链
      */
     public findPOPChains(code: string): POPChainResult[] {
@@ -2147,10 +2247,96 @@ export class POPChainDetector {
         if (mainMethodGadget) {
             for (const prop of mainMethodGadget.properties) {
                 if (prop.type === 'object_call' && prop.details) {
-                    const objPropName = prop.name;  // e.g., 'processor'
-                    const calledMethod = prop.details.calledMethod;  // e.g., 'transform'
-                    const argProps = prop.details.argumentProps || [];  // e.g., ['data']
+                    const objPropName = prop.name;  // e.g., 'processor' 或 'name'
+                    const calledMethod = prop.details.calledMethod;  // 静态方法名 e.g., 'transform'
+                    const calledMethodProp = prop.details.calledMethodProp; // 动态方法名属性 e.g., 'id'
+                    const argProps = prop.details.argumentProps || [];  // e.g., ['data'] 或 ['age']
                     
+                    // === 处理动态方法名模式: ($this->obj)->$methodVar($arg) ===
+                    if (calledMethodProp) {
+                        // 找有危险调用的非魔术方法 gadget
+                        const targetGadget = this.findGadgetWithDangerousMethod(allGadgets, entry.className);
+                        
+                        if (targetGadget) {
+                            addClassWithParent(targetGadget.className);
+                            const innerProps: Array<{name: string, value: string, comment: string}> = [];
+                            
+                            // 分析目标方法的危险调用，设置属性
+                            for (const dc of targetGadget.dangerousCalls) {
+                                if (dc.isDynamic) {
+                                    const match = dc.pattern.match(/\(\$this->(\w+)\)\(/);
+                                    if (match) {
+                                        innerProps.push({
+                                            name: match[1],
+                                            value: '"system"',
+                                            comment: '危险函数名 (可改为 exec, passthru 等)'
+                                        });
+                                    }
+                                }
+                            }
+                            
+                            // 检查目标类是否有 __wakeup，需要初始化所有属性
+                            const targetClass = this.classMap.get(targetGadget.className);
+                            const hasWakeup = targetClass?.methods.some(m => m.name === '__wakeup');
+                            if (hasWakeup) {
+                                const allProps = this.getAllClassProperties(targetGadget.className);
+                                const propUsage = this.getPropertyUsageTypes(targetGadget.className);
+                                
+                                for (const classProp of allProps) {
+                                    if (!innerProps.some(ip => ip.name === classProp.name)) {
+                                        const isCallable = propUsage.callable.has(classProp.name);
+                                        const isObject = propUsage.asObject.has(classProp.name);
+                                        
+                                        if (isCallable && isObject) {
+                                            const invokeGadget = allGadgets.find(g => g.methodName === '__invoke');
+                                            if (invokeGadget) {
+                                                addClassWithParent(invokeGadget.className);
+                                                const invokeClassProps: Array<{name: string, value: string, comment: string}> = [];
+                                                const invokeAllProps = this.getAllClassProperties(invokeGadget.className);
+                                                const invokeClassPropUsage = this.getPropertyUsageTypes(invokeGadget.className);
+                                                
+                                                for (const invokeProp of invokeAllProps) {
+                                                    const isInvCallable = invokeClassPropUsage.callable.has(invokeProp.name);
+                                                    const isInvObject = invokeClassPropUsage.asObject.has(invokeProp.name);
+                                                    
+                                                    if (isInvObject) {
+                                                        invokeClassProps.push({ name: invokeProp.name, value: 'new stdClass()', comment: '用作对象的属性' });
+                                                    } else if (isInvCallable) {
+                                                        invokeClassProps.push({ name: invokeProp.name, value: '"var_dump"', comment: '用作 callable' });
+                                                    } else {
+                                                        invokeClassProps.push({ name: invokeProp.name, value: 'new stdClass()', comment: '默认值' });
+                                                    }
+                                                }
+                                                
+                                                const invokeVarName = `$invokeObj_${classProp.name}`;
+                                                objectVars.push({ varName: invokeVarName, className: invokeGadget.className, props: invokeClassProps });
+                                                innerProps.push({ name: classProp.name, value: invokeVarName, comment: `${invokeGadget.className} 对象 (有 __invoke)` });
+                                            } else {
+                                                innerProps.push({ name: classProp.name, value: 'new stdClass()', comment: '同时用作对象和 callable' });
+                                            }
+                                        } else if (isCallable) {
+                                            innerProps.push({ name: classProp.name, value: '"var_dump"', comment: '用作 callable' });
+                                        } else if (isObject) {
+                                            innerProps.push({ name: classProp.name, value: 'new stdClass()', comment: '用作对象' });
+                                        } else {
+                                            innerProps.push({ name: classProp.name, value: 'new stdClass()', comment: '防止 __wakeup 报错' });
+                                        }
+                                    }
+                                }
+                            }
+                            
+                            objectVars.push({ varName: '$inner', className: targetGadget.className, props: innerProps });
+                            entryProps.push({ name: objPropName, value: '$inner', comment: `${targetGadget.className} 对象` });
+                            entryProps.push({ name: calledMethodProp, value: `"${targetGadget.methodName}"`, comment: '要调用的方法名' });
+                            
+                            for (const argProp of argProps) {
+                                entryProps.push({ name: argProp, value: '"whoami"', comment: '命令参数 (可修改)' });
+                            }
+                        }
+                        continue;  // 已处理，跳过后续逻辑
+                    }
+                    
+                    // === 处理静态方法名模式: ($this->obj)->methodName($arg) ===
                     // 找有这个方法的 gadget
                     const targetGadget = allGadgets.find(g => 
                         g.methodName === calledMethod && g.className !== entry.className
@@ -2323,13 +2509,96 @@ export class POPChainDetector {
                             if (hasWakeup) {
                                 // 获取所有属性（包括父类继承的）
                                 const allProps = this.getAllClassProperties(targetGadget.className);
+                                // 获取属性使用方式
+                                const propUsage = this.getPropertyUsageTypes(targetGadget.className);
+                                
                                 for (const classProp of allProps) {
                                     if (!innerProps.some(ip => ip.name === classProp.name)) {
-                                        innerProps.push({
-                                            name: classProp.name,
-                                            value: 'new stdClass()',
-                                            comment: `防止 __wakeup 报错`
-                                        });
+                                        const isCallable = propUsage.callable.has(classProp.name);
+                                        const isObject = propUsage.asObject.has(classProp.name);
+                                        
+                                        // 如果属性同时被用作 callable 和对象，需要一个有 __invoke 的对象
+                                        if (isCallable && isObject) {
+                                            // 查找有 __invoke 方法的类，或者使用 Closure
+                                            const invokeGadget = allGadgets.find(g => g.methodName === '__invoke');
+                                            if (invokeGadget) {
+                                                addClassWithParent(invokeGadget.className);
+                                                // 为 __invoke 类的属性也生成初始化
+                                                const invokeClassProps: Array<{name: string, value: string, comment: string}> = [];
+                                                const invokeClassPropUsage = this.getPropertyUsageTypes(invokeGadget.className);
+                                                const invokeAllProps = this.getAllClassProperties(invokeGadget.className);
+                                                
+                                                for (const invokeProp of invokeAllProps) {
+                                                    const isInvokeCallable = invokeClassPropUsage.callable.has(invokeProp.name);
+                                                    const isInvokeObject = invokeClassPropUsage.asObject.has(invokeProp.name);
+                                                    
+                                                    if (isInvokeObject) {
+                                                        invokeClassProps.push({
+                                                            name: invokeProp.name,
+                                                            value: 'new stdClass()',
+                                                            comment: `用作对象的属性`
+                                                        });
+                                                    } else if (isInvokeCallable) {
+                                                        invokeClassProps.push({
+                                                            name: invokeProp.name,
+                                                            value: '"var_dump"',
+                                                            comment: `用作 callable 的属性`
+                                                        });
+                                                    } else {
+                                                        invokeClassProps.push({
+                                                            name: invokeProp.name,
+                                                            value: 'new stdClass()',
+                                                            comment: `默认值`
+                                                        });
+                                                    }
+                                                }
+                                                
+                                                // 使用唯一变量名
+                                                const invokeVarName = `$invokeObj_${classProp.name}`;
+                                                objectVars.push({
+                                                    varName: invokeVarName,
+                                                    className: invokeGadget.className,
+                                                    props: invokeClassProps
+                                                });
+                                                
+                                                innerProps.push({
+                                                    name: classProp.name,
+                                                    value: invokeVarName,
+                                                    comment: `${invokeGadget.className} 对象 (有 __invoke)`
+                                                });
+                                            } else {
+                                                // 没有 __invoke 类，使用 stdClass
+                                                innerProps.push({
+                                                    name: classProp.name,
+                                                    value: 'new stdClass()',
+                                                    comment: `同时用作对象和 callable (需手动构造有 __invoke 的对象)`
+                                                });
+                                            }
+                                        }
+                                        // 如果属性只被用作 callable，设置为安全函数
+                                        else if (isCallable) {
+                                            innerProps.push({
+                                                name: classProp.name,
+                                                value: '"var_dump"',
+                                                comment: `用作 callable 的属性 (设置为安全函数)`
+                                            });
+                                        } 
+                                        // 如果属性被用作对象访问，设置为 stdClass
+                                        else if (isObject) {
+                                            innerProps.push({
+                                                name: classProp.name,
+                                                value: 'new stdClass()',
+                                                comment: `用作对象的属性`
+                                            });
+                                        }
+                                        // 其他属性设置为 stdClass
+                                        else {
+                                            innerProps.push({
+                                                name: classProp.name,
+                                                value: 'new stdClass()',
+                                                comment: `防止 __wakeup 报错`
+                                            });
+                                        }
                                     }
                                 }
                             }
@@ -2494,21 +2763,41 @@ export class POPChainDetector {
      * 找到有危险调用的 gadget
      */
     private findGadgetWithDangerousMethod(allGadgets: POPGadget[], excludeClass: string): POPGadget | null {
-        // 优先找有 ($this->func)($arg) 模式的普通方法
+        // 优先找有 ($this->func)($arg) 模式的普通方法（非魔术方法）
+        const nonMagicGadgets: POPGadget[] = [];
+        const magicGadgets: POPGadget[] = [];
+        
         for (const g of allGadgets) {
             if (g.className === excludeClass) continue;
-            if (g.isMagic) continue;  // 排除魔术方法
             
             for (const dc of g.dangerousCalls) {
                 if (dc.isDynamic && dc.pattern.includes('($this->')) {
-                    return g;
+                    if (g.isMagic) {
+                        magicGadgets.push(g);
+                    } else {
+                        nonMagicGadgets.push(g);
+                    }
+                    break;
                 }
             }
         }
         
-        // 其次找任意有危险调用的方法
+        // 优先返回非魔术方法
+        if (nonMagicGadgets.length > 0) {
+            return nonMagicGadgets[0];
+        }
+        
+        // 其次返回魔术方法（但不是 __wakeup，因为它会自动触发）
+        for (const g of magicGadgets) {
+            if (g.methodName !== '__wakeup') {
+                return g;
+            }
+        }
+        
+        // 最后找任意有危险调用的非 __wakeup 方法
         for (const g of allGadgets) {
             if (g.className === excludeClass) continue;
+            if (g.methodName === '__wakeup') continue;  // 跳过 __wakeup
             if (g.dangerousCalls.length > 0) {
                 return g;
             }

@@ -121,12 +121,40 @@ export class CodeGraphProvider implements vscode.WebviewViewProvider {
             const classId = `class_${className}`;
             if (!nodeIds.has(classId)) {
                 nodeIds.add(classId);
+                
+                // 统计类的属性和方法数量
+                let propertyCount = 0;
+                let methodCount = 0;
+                let hasMagicMethods = false;
+                const magicMethodsList: string[] = [];
+                
+                if (classNode.body) {
+                    for (const member of classNode.body) {
+                        if (member.kind === 'propertystatement') {
+                            propertyCount += (member.properties?.length || 1);
+                        } else if (member.kind === 'method') {
+                            methodCount++;
+                            const methodName = member.name?.name || member.name || '';
+                            if (methodName.startsWith('__')) {
+                                hasMagicMethods = true;
+                                magicMethodsList.push(methodName);
+                            }
+                        }
+                    }
+                }
+                
                 nodes.push({
                     id: classId,
                     label: className,
                     type: 'class',
                     metadata: {
-                        line: phpAnalyzer.getNodeLocation(classNode)?.line
+                        line: phpAnalyzer.getNodeLocation(classNode)?.line,
+                        extends: classNode.extends?.name || null,
+                        implements: classNode.implements?.map((i: any) => i.name) || [],
+                        properties: propertyCount,
+                        methods: methodCount,
+                        hasMagicMethods: hasMagicMethods,
+                        magicMethods: magicMethodsList
                     }
                 });
             }
@@ -232,6 +260,21 @@ export class CodeGraphProvider implements vscode.WebviewViewProvider {
                     const methodId = `method_${className}_${methodName}`;
                     const isMagic = this.isMagicMethod(methodName);
                     
+                    // 提取方法参数
+                    const parameters = (member.arguments || []).map((arg: any) => {
+                        const name = arg.name?.name || arg.name || 'unknown';
+                        const type = arg.type?.name || '';
+                        return type ? `${type} $${name}` : `$${name}`;
+                    });
+                    
+                    // 分析方法体中的危险调用
+                    const dangerousCalls: string[] = [];
+                    const triggers: string[] = [];
+                    
+                    if (member.body?.children) {
+                        this.traverseForDangerousCalls(member.body.children, dangerousCalls, triggers);
+                    }
+                    
                     if (!nodeIds.has(methodId)) {
                         nodeIds.add(methodId);
                         nodes.push({
@@ -241,6 +284,10 @@ export class CodeGraphProvider implements vscode.WebviewViewProvider {
                             metadata: {
                                 line: phpAnalyzer.getNodeLocation(member)?.line,
                                 isMagic: isMagic,
+                                visibility: member.visibility || 'public',
+                                parameters: parameters,
+                                dangerousCalls: dangerousCalls,
+                                triggers: triggers,
                                 description: isMagic ? this.getMagicMethodDescription(methodName) : ''
                             }
                         });
@@ -506,6 +553,69 @@ export class CodeGraphProvider implements vscode.WebviewViewProvider {
                 }
             }
         }
+    }
+
+    /**
+     * 遍历方法体查找危险调用和触发器
+     */
+    private traverseForDangerousCalls(nodes: any[], dangerousCalls: string[], triggers: string[]): void {
+        const dangerousFunctions = [
+            'system', 'exec', 'shell_exec', 'passthru', 'popen', 'proc_open',
+            'eval', 'assert', 'preg_replace', 'create_function',
+            'file_get_contents', 'file_put_contents', 'fwrite', 'file',
+            'include', 'include_once', 'require', 'require_once',
+            'unserialize', 'call_user_func', 'call_user_func_array',
+            'array_map', 'array_filter', 'usort', 'uasort'
+        ];
+        
+        const traverseNode = (node: any) => {
+            if (!node) return;
+            
+            // 检测函数调用
+            if (node.kind === 'call') {
+                const funcName = node.what?.name || '';
+                
+                // 直接危险函数调用
+                if (dangerousFunctions.includes(funcName.toLowerCase())) {
+                    dangerousCalls.push(funcName);
+                }
+                
+                // 动态函数调用 ($func)()
+                if (node.what?.kind === 'variable') {
+                    dangerousCalls.push(`($${node.what.name})()`);
+                }
+                
+                // 动态函数调用 ($this->func)()
+                if (node.what?.kind === 'propertylookup') {
+                    const propName = node.what?.offset?.name || 'prop';
+                    dangerousCalls.push(`($this->${propName})()`);
+                }
+            }
+            
+            // 检测对象方法调用触发器
+            if (node.kind === 'call' && node.what?.kind === 'propertylookup') {
+                const obj = node.what.what;
+                const method = node.what.offset;
+                
+                if (obj?.kind === 'variable' && obj.name === 'this' && method?.kind === 'identifier') {
+                    triggers.push(`调用 $this->${method.name}()`);
+                } else if (obj?.kind === 'propertylookup' && method?.kind === 'identifier') {
+                    triggers.push(`调用 $this->obj->${method.name}()`);
+                }
+            }
+            
+            // 递归遍历
+            for (const key of Object.keys(node)) {
+                const child = node[key];
+                if (Array.isArray(child)) {
+                    child.forEach(c => traverseNode(c));
+                } else if (child && typeof child === 'object' && child.kind) {
+                    traverseNode(child);
+                }
+            }
+        };
+        
+        nodes.forEach(n => traverseNode(n));
     }
 
     /**
