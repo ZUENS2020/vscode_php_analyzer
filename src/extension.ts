@@ -4,23 +4,40 @@ import { VariableTracker } from './analyzers/variableTracker';
 import { ClassAnalyzer } from './analyzers/classAnalyzer';
 import { MagicMethodDetector } from './analyzers/magicMethodDetector';
 import { SerializationAnalyzer } from './analyzers/serializationAnalyzer';
-import { POPChainDetector } from './analyzers/popChainDetector';
+import { POPChainDetector, POPChainResult, ChainStep } from './analyzers/popChainDetector';
 import { AttackChainAnalyzer } from './analyzers/attackChainAnalyzer';
 import { VulnerabilityScanner } from './analyzers/vulnerabilityScanner';
 import { AnalysisResultsProvider } from './providers/analysisResultsProvider';
 import { CodeGraphProvider } from './providers/codeGraphProvider';
 import { PayloadGenerator } from './utils/payloadGenerator';
 import { GraphServer } from './server/graphServer';
+import { AnalysisResult } from './types';
 
 let graphServer: GraphServer | null = null;
 
+// Decoration type for highlighting
+let highlightDecorationType: vscode.TextEditorDecorationType;
+
 export function activate(context: vscode.ExtensionContext) {
     console.log('PHP Code Analyzer for CTF is now active');
+
+    // Create highlight decoration type
+    highlightDecorationType = vscode.window.createTextEditorDecorationType({
+        backgroundColor: 'rgba(255, 255, 0, 0.3)',
+        border: '2px solid #ff6b6b',
+        borderRadius: '3px',
+        isWholeLine: true
+    });
 
     // Start the graph server
     const config = vscode.workspace.getConfiguration('phpAnalyzer');
     const port = config.get<number>('graphServerPort') || 3000;
     graphServer = new GraphServer(port);
+    
+    // Register highlight callback - this gets called when user clicks nodes in web UI
+    graphServer.setHighlightCallback((filePath: string, line: number, column?: number) => {
+        highlightInEditor(filePath, line, column || 0);
+    });
     
     graphServer.start().then((success) => {
         if (success) {
@@ -224,17 +241,246 @@ async function findPOPChain(provider: AnalysisResultsProvider) {
 
     try {
         const config = vscode.workspace.getConfiguration('phpAnalyzer');
-        const maxDepth = config.get<number>('maxChainDepth') || 5;
+        const maxDepth = config.get<number>('maxChainDepth') || 10;
 
-        const analyzer = new PHPAnalyzer(docInfo.text);
-        const detector = new POPChainDetector(analyzer.getAST(), maxDepth);
-        const results = detector.findPOPChains(docInfo.document);
+        const detector = new POPChainDetector();
+        const results = detector.findPOPChains(docInfo.text);
         
-        provider.updateResults('POP Chains', results);
-        vscode.window.showInformationMessage(`Found ${results.length} potential POP chains`);
+        // Use results directly for graph visualization
+        const detailedChains = results;
+        
+        // Update graph server with POP chain data
+        if (graphServer) {
+            graphServer.setCurrentFilePath(docInfo.document.uri.fsPath);
+            graphServer.updateGraphData('popchains', {
+                chains: detailedChains,
+                nodes: buildPOPChainNodes(detailedChains),
+                edges: buildPOPChainEdges(detailedChains)
+            });
+            
+            // Also build attack chain graph
+            const attackChainGraph = buildAttackChainFromPOP(detailedChains, docInfo.document);
+            graphServer.updateGraphData('attackchain', attackChainGraph);
+        }
+        
+        // Convert to AnalysisResult format
+        const analysisResults: AnalysisResult[] = results.map(chain => ({
+            type: 'pop-chain',
+            severity: (chain.riskLevel === 'critical' ? 'critical' : 'error') as 'critical' | 'error',
+            message: `POP Chain: ${chain.entryClass}::${chain.entryMethod} → ${chain.finalSink}`,
+            location: new vscode.Location(
+                docInfo.document.uri,
+                new vscode.Position(Math.max(0, (chain.steps[0]?.line || 1) - 1), 0)
+            ),
+            details: chain.description
+        }));
+        
+        provider.updateResults('POP Chains', analysisResults);
+        
+        // Show payload if chains found
+        if (detailedChains.length > 0) {
+            const showPayload = await vscode.window.showInformationMessage(
+                `Found ${detailedChains.length} POP chains! View exploit payload?`,
+                'Show Payload', 'Open Graph'
+            );
+            
+            if (showPayload === 'Show Payload') {
+                // Show payload in new document
+                const payload = detailedChains[0].payload;
+                const doc = await vscode.workspace.openTextDocument({
+                    content: payload,
+                    language: 'php'
+                });
+                await vscode.window.showTextDocument(doc);
+            } else if (showPayload === 'Open Graph') {
+                if (graphServer) {
+                    const port = graphServer.getPort();
+                    await vscode.env.openExternal(vscode.Uri.parse(`http://localhost:${port}`));
+                }
+            }
+        } else {
+            vscode.window.showInformationMessage('No exploitable POP chains found');
+        }
     } catch (error: any) {
         vscode.window.showErrorMessage(`Error finding POP chains: ${error.message}`);
     }
+}
+
+// Helper function to build POP chain graph nodes
+function buildPOPChainNodes(chains: POPChainResult[]): any[] {
+    const nodes: any[] = [];
+    const addedNodes = new Set<string>();
+    
+    for (let chainIdx = 0; chainIdx < chains.length; chainIdx++) {
+        const chain = chains[chainIdx];
+        
+        // 入口点就是第一个step，不需要单独创建entry节点
+        // 直接从steps开始构建节点
+        
+        // Add step nodes
+        for (let i = 0; i < chain.steps.length; i++) {
+            const step = chain.steps[i];
+            const nodeId = `chain_${chainIdx}_step_${i}`;
+            
+            if (!addedNodes.has(nodeId)) {
+                const isEntry = i === 0;
+                const isSink = i === chain.steps.length - 1 && step.calls && step.calls.length > 0;
+                
+                nodes.push({
+                    id: nodeId,
+                    label: isEntry ? `🎯 ${step.className}::${step.methodName}` : `${step.className}::${step.methodName}`,
+                    type: isEntry ? 'entry' : (isSink ? 'sink' : (step.methodName.startsWith('__') ? 'magic' : 'method')),
+                    metadata: {
+                        line: step.line,
+                        trigger: step.trigger,
+                        description: step.description,
+                        dangerous: isSink,
+                        reads: step.reads,
+                        writes: step.writes,
+                        calls: step.calls,
+                        operations: step.operations,
+                        propertyName: step.propertyName,
+                        propertyValue: step.propertyValue,
+                        riskLevel: chain.riskLevel
+                    }
+                });
+                addedNodes.add(nodeId);
+            }
+        }
+        
+        // Add final sink node (dangerous call)
+        if (chain.finalSink) {
+            const sinkId = `chain_${chainIdx}_sink`;
+            if (!addedNodes.has(sinkId)) {
+                nodes.push({
+                    id: sinkId,
+                    label: `💀 ${chain.finalSink}`,
+                    type: 'sink',
+                    metadata: {
+                        dangerous: true,
+                        exploitMethod: chain.exploitMethod
+                    }
+                });
+                addedNodes.add(sinkId);
+            }
+        }
+    }
+    
+    return nodes;
+}
+
+// Helper function to build POP chain graph edges
+function buildPOPChainEdges(chains: POPChainResult[]): any[] {
+    const edges: any[] = [];
+    
+    for (let chainIdx = 0; chainIdx < chains.length; chainIdx++) {
+        const chain = chains[chainIdx];
+        
+        // Connect steps in sequence
+        for (let i = 0; i < chain.steps.length; i++) {
+            const step = chain.steps[i];
+            const stepId = `chain_${chainIdx}_step_${i}`;
+            
+            if (i > 0) {
+                // Connect previous step to current
+                const prevStepId = `chain_${chainIdx}_step_${i - 1}`;
+                edges.push({
+                    source: prevStepId,
+                    target: stepId,
+                    type: 'triggers',
+                    label: step.trigger || '→'
+                });
+            }
+        }
+        
+        // Connect last step to sink
+        if (chain.steps.length > 0 && chain.finalSink) {
+            const lastStepId = `chain_${chainIdx}_step_${chain.steps.length - 1}`;
+            const sinkId = `chain_${chainIdx}_sink`;
+            edges.push({
+                source: lastStepId,
+                target: sinkId,
+                type: 'exploit',
+                label: '利用'
+            });
+        }
+    }
+    
+    return edges;
+}
+
+// Build attack chain graph from POP chains
+function buildAttackChainFromPOP(chains: POPChainResult[], document: vscode.TextDocument): any {
+    const nodes: any[] = [];
+    const edges: any[] = [];
+    
+    for (let chainIdx = 0; chainIdx < chains.length; chainIdx++) {
+        const chain = chains[chainIdx];
+        
+        // Entry node
+        const entryId = `attack_${chainIdx}_entry`;
+        nodes.push({
+            id: entryId,
+            label: `🎯 ${chain.entryClass}::${chain.entryMethod}`,
+            type: 'entry',
+            metadata: {
+                line: chain.steps[0]?.line || 1,
+                riskLevel: chain.riskLevel,
+                description: chain.description
+            }
+        });
+        
+        let prevNodeId = entryId;
+        
+        for (let i = 0; i < chain.steps.length; i++) {
+            const step = chain.steps[i];
+            const nodeId = `attack_${chainIdx}_step_${i}`;
+            
+            nodes.push({
+                id: nodeId,
+                label: `${step.className}::${step.methodName}`,
+                type: i === chain.steps.length - 1 ? 'sink' : 'magic',
+                metadata: {
+                    line: step.line,
+                    trigger: step.trigger,
+                    description: step.description
+                }
+            });
+            
+            edges.push({
+                source: prevNodeId,
+                target: nodeId,
+                type: 'triggers',
+                label: step.trigger || '→'
+            });
+            
+            prevNodeId = nodeId;
+        }
+        
+        // Final sink node
+        if (chain.finalSink) {
+            const sinkId = `attack_${chainIdx}_sink`;
+            nodes.push({
+                id: sinkId,
+                label: `💀 ${chain.finalSink}`,
+                type: 'sink',
+                metadata: {
+                    dangerous: true,
+                    riskLevel: chain.riskLevel,
+                    exploitMethod: chain.exploitMethod
+                }
+            });
+            
+            edges.push({
+                source: prevNodeId,
+                target: sinkId,
+                type: 'exploit',
+                label: '执行'
+            });
+        }
+    }
+    
+    return { nodes, edges };
 }
 
 async function fullSecurityAnalysis(provider: AnalysisResultsProvider, graphProvider: CodeGraphProvider) {
@@ -258,8 +504,20 @@ async function fullSecurityAnalysis(provider: AnalysisResultsProvider, graphProv
             progress.report({ increment: 40, message: 'Detecting POP chains...' });
             const config = vscode.workspace.getConfiguration('phpAnalyzer');
             const maxDepth = config.get<number>('maxChainDepth') || 5;
-            const popDetector = new POPChainDetector(ast, maxDepth);
-            const popResults = popDetector.findPOPChains(docInfo.document);
+            const popDetector = new POPChainDetector();
+            const popChainResults = popDetector.findPOPChains(docInfo.text);
+            
+            // Convert POPChainResult to AnalysisResult format
+            const popResults: AnalysisResult[] = popChainResults.map(chain => ({
+                type: 'pop-chain',
+                severity: (chain.riskLevel === 'critical' ? 'critical' : 'error') as 'critical' | 'error',
+                message: `POP Chain: ${chain.entryClass}::${chain.entryMethod} → ${chain.finalSink}`,
+                location: new vscode.Location(
+                    docInfo.document.uri,
+                    new vscode.Position(Math.max(0, (chain.steps[0]?.line || 1) - 1), 0)
+                ),
+                details: chain.description
+            }));
 
             progress.report({ increment: 60, message: 'Analyzing attack chains...' });
             const attackAnalyzer = new AttackChainAnalyzer(ast, maxDepth);
@@ -431,6 +689,10 @@ async function showInheritanceGraph(provider: CodeGraphProvider) {
         // Update server with graph data
         graphServer.updateGraphData('inheritance', graph);
         
+        // Also update code graph for reference
+        const codeGraph = provider.buildCodeGraph(analyzer.getAST(), docInfo.document);
+        graphServer.updateGraphData('code', codeGraph);
+        
         // Open browser
         const port = graphServer.getPort();
         const url = `http://localhost:${port}`;
@@ -457,6 +719,11 @@ async function showDataFlowGraph(provider: CodeGraphProvider) {
         
         // Update server with graph data
         graphServer.updateGraphData('dataflow', graph);
+        graphServer.setCurrentFilePath(docInfo.document.uri.fsPath);
+        
+        // Also update code graph for reference
+        const codeGraph = provider.buildCodeGraph(analyzer.getAST(), docInfo.document);
+        graphServer.updateGraphData('code', codeGraph);
         
         // Open browser
         const port = graphServer.getPort();
@@ -469,9 +736,88 @@ async function showDataFlowGraph(provider: CodeGraphProvider) {
     }
 }
 
+/**
+ * Highlight a specific line in VS Code editor
+ * Called when user clicks on a node in the web graph viewer
+ */
+async function highlightInEditor(filePath: string, line: number, column: number = 0) {
+    try {
+        // Find or open the file
+        let document: vscode.TextDocument | undefined;
+        
+        // Try to find already open document
+        for (const doc of vscode.workspace.textDocuments) {
+            if (doc.uri.fsPath === filePath || doc.uri.fsPath.endsWith(filePath)) {
+                document = doc;
+                break;
+            }
+        }
+        
+        // If not found, try to open it
+        if (!document && filePath) {
+            try {
+                document = await vscode.workspace.openTextDocument(filePath);
+            } catch (e) {
+                // Try with workspace folder
+                const workspaceFolders = vscode.workspace.workspaceFolders;
+                if (workspaceFolders && workspaceFolders.length > 0) {
+                    const fullPath = vscode.Uri.joinPath(workspaceFolders[0].uri, filePath);
+                    document = await vscode.workspace.openTextDocument(fullPath);
+                }
+            }
+        }
+        
+        if (!document) {
+            vscode.window.showWarningMessage(`Could not find file: ${filePath}`);
+            return;
+        }
+        
+        // Show the document
+        const editor = await vscode.window.showTextDocument(document, {
+            preview: false,
+            viewColumn: vscode.ViewColumn.One
+        });
+        
+        // Line from php-parser and web UI is 1-based
+        // VS Code uses 0-based line numbers
+        // Make sure we stay within document bounds
+        const lineIndex = Math.max(0, Math.min(line, document.lineCount) - 1);
+        const position = new vscode.Position(lineIndex, column);
+        
+        // Create range for the entire line
+        const lineRange = document.lineAt(lineIndex).range;
+        
+        // Set selection and reveal
+        editor.selection = new vscode.Selection(position, position);
+        editor.revealRange(lineRange, vscode.TextEditorRevealType.InCenter);
+        
+        // Apply highlight decoration
+        editor.setDecorations(highlightDecorationType, [lineRange]);
+        
+        // Log for debugging
+        console.log(`Highlighting: input line=${line}, 0-based index=${lineIndex}, file=${filePath}`);
+        
+        // Remove highlight after 3 seconds
+        setTimeout(() => {
+            editor.setDecorations(highlightDecorationType, []);
+        }, 3000);
+        
+        console.log(`Highlighted line ${line} in ${filePath}`);
+        
+    } catch (error: any) {
+        console.error('Error highlighting:', error);
+        vscode.window.showErrorMessage(`Failed to highlight: ${error.message}`);
+    }
+}
+
 export function deactivate() {
     if (graphServer) {
         graphServer.stop();
         graphServer = null;
+    }
+    
+    // Dispose of decoration type
+    if (highlightDecorationType) {
+        highlightDecorationType.dispose();
     }
 }

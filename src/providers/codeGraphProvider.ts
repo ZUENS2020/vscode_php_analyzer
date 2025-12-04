@@ -84,18 +84,33 @@ export class CodeGraphProvider implements vscode.WebviewViewProvider {
         unserializeEntries.forEach((entry, index) => {
             const entryId = `entry_unserialize_${index}`;
             nodeIds.add(entryId);
+            
+            // 构造更详细的标签
+            let label = 'unserialize(';
+            if (entry.paramSource && entry.paramName) {
+                label += `${entry.paramSource}['${entry.paramName}']`;
+            } else if (entry.paramName) {
+                label += `$${entry.paramName}`;
+            } else {
+                label += '...';
+            }
+            label += ')';
+            
             nodes.push({
                 id: entryId,
-                label: 'unserialize($_GET[...])',
+                label: label,
                 type: 'entry',
                 metadata: {
                     line: entry.line,
-                    column: entry.column
+                    column: entry.column,
+                    description: '反序列化入口点 - POP链起点',
+                    paramName: entry.paramName,
+                    paramSource: entry.paramSource
                 }
             });
         });
 
-        // 2. Add all class nodes with inheritance relationships
+        // 2. Add all class nodes with inheritance relationships and properties
         const classes = phpAnalyzer.getAllClasses();
         const classMap = new Map<string, any>();
         
@@ -162,9 +177,45 @@ export class CodeGraphProvider implements vscode.WebviewViewProvider {
                     });
                 }
             }
+
+            // 3. Add class properties (NEW!)
+            if (classNode.body) {
+                for (const member of classNode.body) {
+                    if (member.kind === 'propertystatement') {
+                        // Handle property declarations
+                        const properties = member.properties || [];
+                        for (const prop of properties) {
+                            const propName = prop.name?.name || prop.name || 'unknown';
+                            const propId = `prop_${className}_${propName}`;
+                            const visibility = member.visibility || 'public';
+                            
+                            if (!nodeIds.has(propId)) {
+                                nodeIds.add(propId);
+                                nodes.push({
+                                    id: propId,
+                                    label: `$${propName}`,
+                                    type: 'property',
+                                    metadata: {
+                                        className: className,
+                                        visibility: visibility,
+                                        line: phpAnalyzer.getNodeLocation(prop)?.line
+                                    }
+                                });
+                            }
+
+                            edges.push({
+                                source: classId,
+                                target: propId,
+                                type: 'contains',
+                                label: visibility
+                            });
+                        }
+                    }
+                }
+            }
         }
 
-        // 3. Add method nodes and analyze magic method chains
+        // 4. Add method nodes and analyze magic method chains
         const magicChains = magicAnalyzer.traceChains();
         
         for (const classNode of classes) {
@@ -188,7 +239,9 @@ export class CodeGraphProvider implements vscode.WebviewViewProvider {
                             label: `${className}::${methodName}`,
                             type: isMagic ? 'magic' : 'method',
                             metadata: {
-                                line: phpAnalyzer.getNodeLocation(member)?.line
+                                line: phpAnalyzer.getNodeLocation(member)?.line,
+                                isMagic: isMagic,
+                                description: isMagic ? this.getMagicMethodDescription(methodName) : ''
                             }
                         });
                     }
@@ -199,24 +252,27 @@ export class CodeGraphProvider implements vscode.WebviewViewProvider {
                         type: 'contains'
                     });
 
-                    // Connect unserialize to __wakeup
-                    if (methodName === '__wakeup' && unserializeEntries.length > 0) {
+                    // Connect unserialize to __wakeup and __destruct
+                    if ((methodName === '__wakeup' || methodName === '__destruct') && unserializeEntries.length > 0) {
                         unserializeEntries.forEach((entry, index) => {
+                            const triggerLabel = methodName === '__wakeup' ? 'auto triggers' : 'triggers on destroy';
                             edges.push({
                                 source: `entry_unserialize_${index}`,
                                 target: methodId,
                                 type: 'triggers',
-                                label: 'triggers'
+                                label: triggerLabel
                             });
                         });
                     }
+
+                    // 5. Analyze method body for property usage and magic method triggers
+                    this.analyzeMethodBody(member, className, methodName, methodId, nodes, edges, nodeIds, phpAnalyzer);
                 }
             }
         }
 
-        // 4. Add magic method trigger chains
+        // 6. Add magic method trigger chains from analyzer
         for (const chain of magicChains) {
-            // Extract className and methodName from chain.entryPoint (format: "ClassName::methodName")
             const parts = chain.entryPoint.split('::');
             const entryClassName = parts[0];
             const entryMethodName = parts[1];
@@ -230,16 +286,16 @@ export class CodeGraphProvider implements vscode.WebviewViewProvider {
                         nodeIds.add(triggerId);
                         nodes.push({
                             id: triggerId,
-                            label: `${trigger.className}::${trigger.methodName}`,
+                            label: `→ ${trigger.methodName}`,
                             type: 'magic',
                             metadata: {
                                 line: trigger.line,
-                                column: trigger.column
+                                column: trigger.column,
+                                triggeredBy: trigger.triggeredBy
                             }
                         });
                     }
 
-                    // Connect the entry method to the triggered magic method
                     if (nodeIds.has(entryNodeId)) {
                         edges.push({
                             source: entryNodeId,
@@ -251,9 +307,9 @@ export class CodeGraphProvider implements vscode.WebviewViewProvider {
                 }
             }
 
-            // 5. Add property flow nodes
+            // Add property flow nodes
             for (const flow of chain.propertyFlows) {
-                const propId = `prop_${flow.fromClass}_${flow.propertyName}`;
+                const propId = `flow_${flow.fromClass}_${flow.propertyName}_${flow.line}`;
                 
                 if (!nodeIds.has(propId)) {
                     nodeIds.add(propId);
@@ -263,29 +319,33 @@ export class CodeGraphProvider implements vscode.WebviewViewProvider {
                         type: 'property',
                         metadata: {
                             line: flow.line,
-                            column: flow.column
+                            usedAs: flow.usedAs,
+                            toVariable: flow.toVariable
                         }
                     });
                 }
 
-                // Connect property to the method that uses it
-                if (nodeIds.has(entryNodeId)) {
+                const classNodeId = `class_${flow.fromClass}`;
+                if (nodeIds.has(classNodeId)) {
                     edges.push({
-                        source: `class_${flow.fromClass}`,
+                        source: classNodeId,
                         target: propId,
-                        type: 'contains'
+                        type: 'dataflow',
+                        label: `→ $${flow.toVariable}`
                     });
+                }
 
+                if (nodeIds.has(entryNodeId)) {
                     edges.push({
                         source: propId,
                         target: entryNodeId,
                         type: 'dataflow',
-                        label: `flows to ${flow.toVariable}`
+                        label: `used as ${flow.usedAs}`
                     });
                 }
             }
 
-            // 6. Add dangerous sink nodes
+            // Add dangerous sink nodes
             for (const sink of chain.dangerousSinks) {
                 const sinkId = `sink_${sink}_${chain.entryPoint}`;
                 
@@ -293,8 +353,12 @@ export class CodeGraphProvider implements vscode.WebviewViewProvider {
                     nodeIds.add(sinkId);
                     nodes.push({
                         id: sinkId,
-                        label: `${sink}()`,
-                        type: 'sink'
+                        label: `⚠ ${sink}()`,
+                        type: 'sink',
+                        metadata: {
+                            dangerous: true,
+                            description: '危险函数调用'
+                        }
                     });
                 }
 
@@ -303,7 +367,7 @@ export class CodeGraphProvider implements vscode.WebviewViewProvider {
                         source: entryNodeId,
                         target: sinkId,
                         type: 'calls',
-                        label: 'calls'
+                        label: 'calls dangerous'
                     });
                 }
             }
@@ -312,52 +376,265 @@ export class CodeGraphProvider implements vscode.WebviewViewProvider {
         return { nodes, edges };
     }
 
+    /**
+     * Analyze method body for property usage and potential magic method triggers
+     */
+    private analyzeMethodBody(
+        methodNode: any, 
+        className: string, 
+        methodName: string, 
+        methodId: string,
+        nodes: GraphNode[], 
+        edges: GraphEdge[], 
+        nodeIds: Set<string>,
+        phpAnalyzer: PHPAnalyzer
+    ): void {
+        if (!methodNode.body) return;
+
+        const propertyUsages = new Map<string, { read: boolean; write: boolean; asCallable: boolean; asObject: boolean }>();
+
+        phpAnalyzer.traverse(methodNode.body, (node: any) => {
+            // Track property lookups: $this->property
+            if (node.kind === 'propertylookup' && node.what?.kind === 'variable' && node.what?.name === 'this') {
+                const propName = node.offset?.name || '';
+                if (propName) {
+                    if (!propertyUsages.has(propName)) {
+                        propertyUsages.set(propName, { read: false, write: false, asCallable: false, asObject: false });
+                    }
+                    propertyUsages.get(propName)!.read = true;
+                }
+            }
+
+            // Track callable usage: ($this->property)($args) - triggers __invoke
+            if (node.kind === 'call' && node.what?.kind === 'propertylookup') {
+                const propName = node.what.offset?.name || '';
+                if (propName && node.what.what?.name === 'this') {
+                    if (!propertyUsages.has(propName)) {
+                        propertyUsages.set(propName, { read: false, write: false, asCallable: false, asObject: false });
+                    }
+                    propertyUsages.get(propName)!.asCallable = true;
+
+                    // Add __invoke trigger edge
+                    const invokeTriggerId = `invoke_trigger_${className}_${methodName}_${propName}`;
+                    if (!nodeIds.has(invokeTriggerId)) {
+                        nodeIds.add(invokeTriggerId);
+                        nodes.push({
+                            id: invokeTriggerId,
+                            label: `→ __invoke`,
+                            type: 'magic',
+                            metadata: {
+                                triggeredBy: `($this->${propName})(...)`,
+                                description: '作为函数调用触发 __invoke'
+                            }
+                        });
+                        edges.push({
+                            source: methodId,
+                            target: invokeTriggerId,
+                            type: 'triggers',
+                            label: `$this->${propName}()`
+                        });
+                    }
+                }
+            }
+
+            // Track property write on object: $var->prop = value - triggers __set
+            if (node.kind === 'assign' && node.left?.kind === 'propertylookup') {
+                const objectVar = node.left.what?.name || '';
+                const propName = node.left.offset?.name || '';
+                if (objectVar && propName && objectVar !== 'this') {
+                    const setTriggerId = `set_trigger_${className}_${methodName}_${objectVar}_${propName}`;
+                    if (!nodeIds.has(setTriggerId)) {
+                        nodeIds.add(setTriggerId);
+                        nodes.push({
+                            id: setTriggerId,
+                            label: `→ __set`,
+                            type: 'magic',
+                            metadata: {
+                                triggeredBy: `$${objectVar}->${propName} = ...`,
+                                description: '属性赋值触发 __set'
+                            }
+                        });
+                        edges.push({
+                            source: methodId,
+                            target: setTriggerId,
+                            type: 'triggers',
+                            label: `$${objectVar}->${propName}=`
+                        });
+                    }
+                }
+            }
+
+            // Track dynamic method call: $var->$method() - triggers __call
+            if (node.kind === 'call' && node.what?.kind === 'propertylookup' && node.what.offset?.kind === 'variable') {
+                const callTriggerId = `call_trigger_${className}_${methodName}`;
+                if (!nodeIds.has(callTriggerId)) {
+                    nodeIds.add(callTriggerId);
+                    nodes.push({
+                        id: callTriggerId,
+                        label: `→ dynamic call`,
+                        type: 'magic',
+                        metadata: {
+                            description: '动态方法调用'
+                        }
+                    });
+                    edges.push({
+                        source: methodId,
+                        target: callTriggerId,
+                        type: 'triggers',
+                        label: 'dynamic'
+                    });
+                }
+            }
+        });
+
+        // Add property usage edges
+        for (const [propName, usage] of propertyUsages) {
+            const propId = `prop_${className}_${propName}`;
+            if (nodeIds.has(propId)) {
+                let label = '';
+                if (usage.asCallable) label = 'as callable';
+                else if (usage.asObject) label = 'as object';
+                else if (usage.read) label = 'reads';
+                
+                if (label) {
+                    edges.push({
+                        source: methodId,
+                        target: propId,
+                        type: 'dataflow',
+                        label: label
+                    });
+                }
+            }
+        }
+    }
+
+    /**
+     * Get description for magic methods
+     */
+    private getMagicMethodDescription(methodName: string): string {
+        const descriptions: Record<string, string> = {
+            '__construct': '构造函数',
+            '__destruct': '析构函数 - 对象销毁时自动调用',
+            '__wakeup': '反序列化时自动调用',
+            '__sleep': '序列化时调用',
+            '__toString': '对象转字符串时调用',
+            '__invoke': '对象作为函数调用时触发',
+            '__call': '调用不存在的方法时触发',
+            '__callStatic': '调用不存在的静态方法时触发',
+            '__get': '访问不存在的属性时触发',
+            '__set': '设置不存在的属性时触发',
+            '__isset': '检查不存在的属性时触发',
+            '__unset': '删除不存在的属性时触发',
+            '__clone': '克隆对象时调用',
+            '__debugInfo': 'var_dump时调用'
+        };
+        return descriptions[methodName] || '';
+    }
+
     public buildInheritanceGraph(ast: any, document: vscode.TextDocument): CodeGraph {
         const nodes: GraphNode[] = [];
         const edges: GraphEdge[] = [];
+        const nodeIds = new Set<string>();
 
-        if (ast.children) {
-            for (const child of ast.children) {
-                if (child.kind === 'class') {
-                    const className = child.name?.name || 'Unknown';
+        const phpAnalyzer = new PHPAnalyzer('');
+        phpAnalyzer['ast'] = ast;
+        const classes = phpAnalyzer.getAllClasses();
+
+        for (const classNode of classes) {
+            const className = classNode.name?.name || 'Unknown';
+            const classId = `class_${className}`;
+            
+            if (!nodeIds.has(classId)) {
+                nodeIds.add(classId);
+                nodes.push({
+                    id: classId,
+                    label: className,
+                    type: 'class',
+                    metadata: {
+                        line: phpAnalyzer.getNodeLocation(classNode)?.line
+                    }
+                });
+            }
+
+            // Add extends relationship
+            if (classNode.extends) {
+                const parentName = classNode.extends.name || 'Unknown';
+                const parentId = `class_${parentName}`;
+                
+                if (!nodeIds.has(parentId)) {
+                    nodeIds.add(parentId);
                     nodes.push({
-                        id: `class_${className}`,
-                        label: className,
-                        type: 'class'
+                        id: parentId,
+                        label: parentName,
+                        type: 'class',
+                        metadata: {
+                            isParent: true
+                        }
                     });
+                }
 
-                    // Add extends relationship
-                    if (child.extends) {
-                        const parentName = child.extends.name || 'Unknown';
+                edges.push({
+                    source: classId,
+                    target: parentId,
+                    type: 'extends',
+                    label: 'extends'
+                });
+            }
+
+            // Add implements relationships
+            if (classNode.implements) {
+                for (const iface of classNode.implements) {
+                    const ifaceName = iface.name || 'Unknown';
+                    const ifaceId = `interface_${ifaceName}`;
+                    
+                    if (!nodeIds.has(ifaceId)) {
+                        nodeIds.add(ifaceId);
                         nodes.push({
-                            id: `class_${parentName}`,
-                            label: parentName,
-                            type: 'class'
-                        });
-
-                        edges.push({
-                            source: `class_${className}`,
-                            target: `class_${parentName}`,
-                            type: 'extends',
-                            label: 'extends'
+                            id: ifaceId,
+                            label: `<<interface>> ${ifaceName}`,
+                            type: 'class',
+                            metadata: {
+                                isInterface: true
+                            }
                         });
                     }
 
-                    // Add implements relationships
-                    if (child.implements) {
-                        for (const iface of child.implements) {
-                            const ifaceName = iface.name || 'Unknown';
-                            nodes.push({
-                                id: `interface_${ifaceName}`,
-                                label: ifaceName,
-                                type: 'class'
-                            });
+                    edges.push({
+                        source: classId,
+                        target: ifaceId,
+                        type: 'implements',
+                        label: 'implements'
+                    });
+                }
+            }
+
+            // Add class properties
+            if (classNode.body) {
+                for (const member of classNode.body) {
+                    if (member.kind === 'propertystatement') {
+                        const properties = member.properties || [];
+                        for (const prop of properties) {
+                            const propName = prop.name?.name || prop.name || 'unknown';
+                            const propId = `prop_${className}_${propName}`;
+                            const visibility = member.visibility || 'public';
+                            
+                            if (!nodeIds.has(propId)) {
+                                nodeIds.add(propId);
+                                nodes.push({
+                                    id: propId,
+                                    label: `${visibility} $${propName}`,
+                                    type: 'property',
+                                    metadata: {
+                                        className: className,
+                                        visibility: visibility
+                                    }
+                                });
+                            }
 
                             edges.push({
-                                source: `class_${className}`,
-                                target: `interface_${ifaceName}`,
-                                type: 'implements',
-                                label: 'implements'
+                                source: classId,
+                                target: propId,
+                                type: 'contains'
                             });
                         }
                     }
@@ -371,293 +648,196 @@ export class CodeGraphProvider implements vscode.WebviewViewProvider {
     public buildDataFlowGraph(ast: any, document: vscode.TextDocument): CodeGraph {
         const nodes: GraphNode[] = [];
         const edges: GraphEdge[] = [];
+        const nodeIds = new Set<string>();
 
-        try {
-            // Run data flow analysis
-            const dataFlowAnalyzer = new DataFlowAnalyzer(ast, document);
-            const dataFlowAnalysis = dataFlowAnalyzer.analyze();
+        const phpAnalyzer = new PHPAnalyzer('');
+        phpAnalyzer['ast'] = ast;
 
-            // Add sources to nodes
-            dataFlowAnalysis.sources.forEach((source: DataSource) => {
+        // 1. Find all user input sources (superglobals)
+        const sources = ['$_GET', '$_POST', '$_COOKIE', '$_REQUEST', '$_FILES', '$_SERVER'];
+        const foundSources: { name: string; line: number }[] = [];
+
+        phpAnalyzer.traverse(ast, (node: any) => {
+            if (node.kind === 'offsetlookup' && node.what?.kind === 'variable') {
+                const varName = '$' + (node.what.name || '');
+                if (sources.includes(varName)) {
+                    const loc = phpAnalyzer.getNodeLocation(node);
+                    foundSources.push({ name: varName, line: loc?.line || 0 });
+                }
+            }
+        });
+
+        // Add source nodes
+        foundSources.forEach((src, index) => {
+            const srcId = `source_${src.name}_${index}`;
+            if (!nodeIds.has(srcId)) {
+                nodeIds.add(srcId);
                 nodes.push({
-                    id: source.id,
-                    label: source.name,
+                    id: srcId,
+                    label: `${src.name}[...]`,
                     type: 'source',
                     metadata: {
-                        sourceType: source.type,
-                        isTainted: source.isTainted,
-                        line: source.line,
-                        column: source.column
+                        line: src.line,
+                        description: '用户输入源'
                     }
                 });
-            });
+            }
+        });
 
-            // Add sinks to nodes
-            dataFlowAnalysis.sinks.forEach((sink: DataSink) => {
+        // 2. Find all dangerous sinks
+        const dangerousFuncs = ['eval', 'system', 'exec', 'passthru', 'shell_exec', 
+                               'unserialize', 'include', 'require', 'call_user_func'];
+        const foundSinks: { name: string; line: number }[] = [];
+
+        phpAnalyzer.traverse(ast, (node: any) => {
+            if (node.kind === 'call' && node.what?.name) {
+                const funcName = node.what.name;
+                if (dangerousFuncs.includes(funcName)) {
+                    const loc = phpAnalyzer.getNodeLocation(node);
+                    foundSinks.push({ name: funcName, line: loc?.line || 0 });
+                }
+            }
+        });
+
+        // Add sink nodes
+        foundSinks.forEach((sink, index) => {
+            const sinkId = `sink_${sink.name}_${index}`;
+            if (!nodeIds.has(sinkId)) {
+                nodeIds.add(sinkId);
                 nodes.push({
-                    id: sink.id,
-                    label: sink.name,
+                    id: sinkId,
+                    label: `⚠ ${sink.name}()`,
                     type: 'sink',
                     metadata: {
-                        sinkType: sink.type,
-                        severity: sink.severity,
                         line: sink.line,
-                        column: sink.column
+                        dangerous: true
                     }
                 });
-            });
+            }
+        });
 
-            // Add entities (transformers, variables, functions, objects)
-            dataFlowAnalysis.entities.forEach((entity: Entity) => {
-                // Skip sources and sinks (already added)
-                if (entity.type !== 'source' && entity.type !== 'sink') {
-                    // Map entity type to GraphNode type
-                    let nodeType: GraphNode['type'] = 'method';
-                    if (entity.type === 'function') {
-                        nodeType = 'method';
-                    } else if (entity.type === 'object') {
-                        nodeType = 'class';
-                    } else if (entity.type === 'variable') {
-                        nodeType = 'property';
-                    } else if (entity.type === 'transformer') {
-                        nodeType = 'method';
+        // 3. Track variable assignments and data flow
+        const variableFlows: { from: string; to: string; line: number }[] = [];
+
+        phpAnalyzer.traverse(ast, (node: any) => {
+            if (node.kind === 'assign') {
+                const leftVar = node.left?.name ? `$${node.left.name}` : null;
+                let rightSource = null;
+
+                // Check if right side is a source
+                if (node.right?.kind === 'offsetlookup' && node.right.what?.kind === 'variable') {
+                    const varName = '$' + (node.right.what.name || '');
+                    if (sources.includes(varName)) {
+                        rightSource = varName;
                     }
-                    
-                    nodes.push({
-                        id: entity.id,
-                        label: entity.name,
-                        type: nodeType,
-                        metadata: {
-                            isTainted: entity.isTainted,
-                            line: entity.line,
-                            column: entity.column,
-                            value: entity.value
-                        }
-                    });
                 }
-            });
 
-            // Add relationships as edges
-            dataFlowAnalysis.relationships.forEach((rel: Relationship) => {
-                edges.push({
-                    source: rel.source.id,
-                    target: rel.target.id,
-                    type: 'dataflow',
-                    label: rel.type,
-                    metadata: {
-                        isTainted: rel.isTainted,
-                        conditions: rel.conditions
-                    }
-                });
-            });
+                if (leftVar && rightSource) {
+                    const loc = phpAnalyzer.getNodeLocation(node);
+                    variableFlows.push({ from: rightSource, to: leftVar, line: loc?.line || 0 });
 
-            // Add data flow paths as highlighted edges
-            dataFlowAnalysis.paths.forEach((path: DataFlowPath) => {
-                // Connect source to first path node
-                if (path.path.length > 0) {
-                    edges.push({
-                        source: path.source.id,
-                        target: path.path[0].id,
-                        type: 'dataflow',
-                        label: 'flows to',
-                        metadata: {
-                            isTainted: path.isTainted,
-                            vulnerabilityType: path.vulnerabilityType,
-                            severity: path.severity
-                        }
-                    });
-
-                    // Connect path nodes
-                    for (let i = 0; i < path.path.length - 1; i++) {
-                        edges.push({
-                            source: path.path[i].id,
-                            target: path.path[i + 1].id,
-                            type: 'dataflow',
-                            label: path.path[i].operation || 'flows to',
+                    // Add variable node
+                    const varId = `var_${leftVar}_${loc?.line || 0}`;
+                    if (!nodeIds.has(varId)) {
+                        nodeIds.add(varId);
+                        nodes.push({
+                            id: varId,
+                            label: leftVar,
+                            type: 'property',
                             metadata: {
-                                isTainted: path.isTainted
+                                line: loc?.line,
+                                tainted: true
                             }
                         });
                     }
 
-                    // Connect last path node to sink
-                    if (path.path.length > 0) {
+                    // Connect source to variable
+                    const srcId = foundSources.findIndex(s => s.name === rightSource);
+                    if (srcId >= 0) {
                         edges.push({
-                            source: path.path[path.path.length - 1].id,
-                            target: path.sink.id,
+                            source: `source_${rightSource}_${srcId}`,
+                            target: varId,
                             type: 'dataflow',
-                            label: 'reaches',
-                            metadata: {
-                                isTainted: path.isTainted,
-                                vulnerabilityType: path.vulnerabilityType,
-                                severity: path.severity
-                            }
+                            label: 'assigns'
                         });
                     }
-                } else {
-                    // Direct connection from source to sink
+                }
+            }
+        });
+
+        // 4. Connect variables to sinks
+        foundSinks.forEach((sink, sinkIndex) => {
+            const sinkId = `sink_${sink.name}_${sinkIndex}`;
+            
+            // For unserialize specifically
+            if (sink.name === 'unserialize') {
+                foundSources.forEach((src, srcIndex) => {
                     edges.push({
-                        source: path.source.id,
-                        target: path.sink.id,
+                        source: `source_${src.name}_${srcIndex}`,
+                        target: sinkId,
                         type: 'dataflow',
-                        label: 'direct flow',
+                        label: '⚠ tainted data',
                         metadata: {
-                            isTainted: path.isTainted,
-                            vulnerabilityType: path.vulnerabilityType,
-                            severity: path.severity
+                            severity: 'critical',
+                            vulnerabilityType: 'Insecure Deserialization'
                         }
                     });
-                }
-            });
+                });
+            }
+        });
 
-            // Run object relation analysis
-            const objectAnalyzer = new ObjectRelationAnalyzer(ast, document);
-            const objectRelations = objectAnalyzer.analyze();
+        // 5. Add magic method chain for POP
+        const magicAnalyzer = new MagicMethodChainAnalyzer(ast, document);
+        const chains = magicAnalyzer.traceChains();
 
-            // Add object nodes and edges
-            objectRelations.forEach((objRel: ObjectRelation) => {
-                const objNodeId = `object_${objRel.objectName}`;
+        for (const chain of chains) {
+            const entryId = `chain_entry_${chain.entryPoint}`;
+            if (!nodeIds.has(entryId)) {
+                nodeIds.add(entryId);
                 nodes.push({
-                    id: objNodeId,
-                    label: `${objRel.objectName} (${objRel.className})`,
-                    type: 'class',
+                    id: entryId,
+                    label: chain.entryPoint,
+                    type: 'magic',
                     metadata: {
-                        className: objRel.className,
-                        line: objRel.line,
-                        column: objRel.column
+                        entryType: chain.entryType
                     }
                 });
+            }
 
-                // Add property access edges
-                objRel.properties.forEach((prop: PropertyAccess) => {
-                    const propNodeId = `prop_${objRel.objectName}_${prop.propertyName}`;
-                    nodes.push({
-                        id: propNodeId,
-                        label: prop.propertyName,
-                        type: 'property',
-                        metadata: {
-                            isWrite: prop.isWrite,
-                            isTainted: prop.isTainted
-                        }
-                    });
-
+            // Connect unserialize to chain entry
+            foundSinks.forEach((sink, index) => {
+                if (sink.name === 'unserialize') {
                     edges.push({
-                        source: objNodeId,
-                        target: propNodeId,
-                        type: 'contains',
-                        label: prop.isWrite ? 'writes' : 'reads'
+                        source: `sink_${sink.name}_${index}`,
+                        target: entryId,
+                        type: 'triggers',
+                        label: 'triggers'
                     });
-                });
-
-                // Add method call edges
-                objRel.methods.forEach((method: MethodCall) => {
-                    const methodNodeId = `method_${objRel.objectName}_${method.methodName}_${method.line}`;
-                    nodes.push({
-                        id: methodNodeId,
-                        label: `${method.methodName}()`,
-                        type: 'method',
-                        metadata: {
-                            isTainted: method.isTainted,
-                            arguments: method.arguments
-                        }
-                    });
-
-                    edges.push({
-                        source: objNodeId,
-                        target: methodNodeId,
-                        type: 'calls',
-                        label: 'calls'
-                    });
-                });
+                }
             });
 
-            // Run call graph analysis
-            const callAnalyzer = new CallGraphAnalyzer(ast, document);
-            const callRelations = callAnalyzer.analyze();
-
-            // Add call graph nodes and edges
-            const functionNodes = new Set<string>();
-            callRelations.forEach((call: CallRelation) => {
-                // Add caller node if not exists
-                if (!functionNodes.has(call.caller)) {
+            // Add chain steps
+            for (const trigger of chain.chain) {
+                const triggerId = `chain_${trigger.className}_${trigger.methodName}`;
+                if (!nodeIds.has(triggerId)) {
+                    nodeIds.add(triggerId);
                     nodes.push({
-                        id: `func_${call.caller}`,
-                        label: call.caller,
-                        type: 'method',
+                        id: triggerId,
+                        label: `${trigger.className}::${trigger.methodName}`,
+                        type: 'magic',
                         metadata: {
-                            isFunction: true
+                            triggeredBy: trigger.triggeredBy
                         }
                     });
-                    functionNodes.add(call.caller);
                 }
 
-                // Add callee node if not exists
-                if (!functionNodes.has(call.callee)) {
-                    nodes.push({
-                        id: `func_${call.callee}`,
-                        label: call.callee,
-                        type: 'method',
-                        metadata: {
-                            isFunction: true
-                        }
-                    });
-                    functionNodes.add(call.callee);
-                }
-
-                // Add call edge
                 edges.push({
-                    source: `func_${call.caller}`,
-                    target: `func_${call.callee}`,
-                    type: 'calls',
-                    label: call.isRecursive ? 'recursive call' : 'calls',
-                    metadata: {
-                        isRecursive: call.isRecursive,
-                        isTainted: call.isTainted,
-                        arguments: call.arguments
-                    }
+                    source: entryId,
+                    target: triggerId,
+                    type: 'triggers',
+                    label: trigger.triggeredBy
                 });
-            });
-
-            // Run conditional path analysis
-            const conditionalAnalyzer = new ConditionalPathAnalyzer(ast, document);
-            const conditions = conditionalAnalyzer.analyze();
-
-            // Add condition nodes
-            conditions.forEach((condition: Condition, index: number) => {
-                const condNodeId = `cond_${condition.type}_${condition.line}_${condition.column}`;
-                nodes.push({
-                    id: condNodeId,
-                    label: `${condition.type}: ${condition.expression.substring(0, 30)}`,
-                    type: 'method',
-                    metadata: {
-                        conditionType: condition.type,
-                        expression: condition.expression,
-                        branches: condition.branches.length
-                    }
-                });
-            });
-
-        } catch (error: any) {
-            console.error('Error in data flow analysis:', error);
-            // Return simplified graph on error
-            const sources = ['$_GET', '$_POST', '$_COOKIE', '$_REQUEST'];
-            const sinks = ['eval', 'system', 'exec', 'unserialize'];
-
-            sources.forEach(source => {
-                nodes.push({
-                    id: source,
-                    label: source,
-                    type: 'source'
-                });
-            });
-
-            sinks.forEach(sink => {
-                nodes.push({
-                    id: sink,
-                    label: sink + '()',
-                    type: 'sink'
-                });
-            });
+            }
         }
 
         return { nodes, edges };
@@ -666,28 +846,99 @@ export class CodeGraphProvider implements vscode.WebviewViewProvider {
     public buildAttackChainGraph(attackChains: any[]): CodeGraph {
         const nodes: GraphNode[] = [];
         const edges: GraphEdge[] = [];
+        const nodeIds = new Set<string>();
+
+        // Add entry point
+        const entryId = 'attack_entry';
+        nodeIds.add(entryId);
+        nodes.push({
+            id: entryId,
+            label: '⚡ unserialize()',
+            type: 'entry',
+            metadata: {
+                description: 'Attack entry point'
+            }
+        });
 
         // Build graph from attack chains
         attackChains.forEach((chain, chainIndex) => {
-            if (chain.steps && Array.isArray(chain.steps)) {
-                chain.steps.forEach((step: any, stepIndex: number) => {
-                    const nodeId = `chain${chainIndex}_step${stepIndex}`;
+            const chainEntryId = `chain_${chainIndex}_entry`;
+            
+            // Add chain entry node
+            if (chain.entryPoint) {
+                if (!nodeIds.has(chainEntryId)) {
+                    nodeIds.add(chainEntryId);
                     nodes.push({
-                        id: nodeId,
-                        label: step.type || step.description || 'Step',
-                        type: 'sink'
+                        id: chainEntryId,
+                        label: chain.entryPoint,
+                        type: 'magic',
+                        metadata: {
+                            exploitability: chain.exploitability,
+                            description: chain.description
+                        }
                     });
+                }
 
-                    // Connect to previous step
-                    if (stepIndex > 0) {
-                        edges.push({
-                            source: `chain${chainIndex}_step${stepIndex - 1}`,
-                            target: nodeId,
-                            type: 'dataflow',
-                            label: 'leads to'
+                edges.push({
+                    source: entryId,
+                    target: chainEntryId,
+                    type: 'triggers',
+                    label: 'triggers'
+                });
+            }
+
+            // Add chain steps
+            if (chain.steps && Array.isArray(chain.steps)) {
+                let prevNodeId = chainEntryId;
+                
+                chain.steps.forEach((step: any, stepIndex: number) => {
+                    const stepId = `chain${chainIndex}_step${stepIndex}`;
+                    
+                    if (!nodeIds.has(stepId)) {
+                        nodeIds.add(stepId);
+                        nodes.push({
+                            id: stepId,
+                            label: step.operation || step.methodName || 'Step',
+                            type: step.methodName?.startsWith('__') ? 'magic' : 'method',
+                            metadata: {
+                                className: step.className,
+                                operation: step.operation
+                            }
                         });
                     }
+
+                    edges.push({
+                        source: prevNodeId,
+                        target: stepId,
+                        type: 'calls',
+                        label: 'calls'
+                    });
+
+                    prevNodeId = stepId;
                 });
+
+                // Add sink if exists
+                if (chain.sink) {
+                    const sinkId = `chain${chainIndex}_sink`;
+                    if (!nodeIds.has(sinkId)) {
+                        nodeIds.add(sinkId);
+                        nodes.push({
+                            id: sinkId,
+                            label: `⚠ ${chain.sink}()`,
+                            type: 'sink',
+                            metadata: {
+                                dangerous: true
+                            }
+                        });
+                    }
+
+                    edges.push({
+                        source: prevNodeId,
+                        target: sinkId,
+                        type: 'calls',
+                        label: 'reaches'
+                    });
+                }
             }
         });
 

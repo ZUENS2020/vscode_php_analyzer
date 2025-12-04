@@ -60,8 +60,8 @@ export class MagicMethodChainAnalyzer {
     /**
      * Find unserialize entry points in the code
      */
-    findUnserializeEntries(): Array<{ location: vscode.Location; line: number; column: number }> {
-        const entries: Array<{ location: vscode.Location; line: number; column: number }> = [];
+    findUnserializeEntries(): Array<{ location: vscode.Location; line: number; column: number; paramName?: string; paramSource?: string }> {
+        const entries: Array<{ location: vscode.Location; line: number; column: number; paramName?: string; paramSource?: string }> = [];
         
         this.analyzer.traverse(this.ast, (node) => {
             if (node.kind === 'call' && node.what) {
@@ -70,10 +70,23 @@ export class MagicMethodChainAnalyzer {
                     const loc = this.analyzer.getNodeLocation(node);
                     if (loc) {
                         const position = new vscode.Position(loc.line, loc.character);
+                        
+                        // 解析参数来源
+                        let paramName: string | undefined;
+                        let paramSource: string | undefined;
+                        if (node.arguments && node.arguments.length > 0) {
+                            const arg = node.arguments[0];
+                            const extracted = this.extractParamSource(arg);
+                            paramName = extracted.paramName;
+                            paramSource = extracted.paramSource;
+                        }
+                        
                         entries.push({
                             location: new vscode.Location(this.document.uri, position),
                             line: loc.line,
-                            column: loc.character
+                            column: loc.character,
+                            paramName,
+                            paramSource
                         });
                     }
                 }
@@ -81,6 +94,51 @@ export class MagicMethodChainAnalyzer {
         });
 
         return entries;
+    }
+
+    /**
+     * 从 AST 节点提取参数来源信息
+     */
+    private extractParamSource(node: any): { paramName?: string; paramSource?: string } {
+        if (!node) return {};
+        
+        // $_GET['data'], $_POST['data'] 等
+        if (node.kind === 'offsetlookup' && node.what) {
+            const source = this.nodeToString(node.what);
+            const offset = node.offset ? this.nodeToString(node.offset) : undefined;
+            if (source && ['$_GET', '$_POST', '$_REQUEST', '$_COOKIE'].includes(source)) {
+                return {
+                    paramName: offset?.replace(/["']/g, ''),
+                    paramSource: source
+                };
+            }
+        }
+        
+        // 变量: $data = $_GET['data']; unserialize($data);
+        if (node.kind === 'variable') {
+            const varName = node.name;
+            // 简单情况，返回变量名
+            return { paramName: varName, paramSource: 'variable' };
+        }
+        
+        // base64_decode($_GET['data']) 等包装函数
+        if (node.kind === 'call' && node.arguments && node.arguments.length > 0) {
+            return this.extractParamSource(node.arguments[0]);
+        }
+        
+        return {};
+    }
+
+    /**
+     * 将 AST 节点转换为字符串表示
+     */
+    private nodeToString(node: any): string | undefined {
+        if (!node) return undefined;
+        if (node.kind === 'variable') return '$' + node.name;
+        if (node.kind === 'string') return `"${node.value}"`;
+        if (node.kind === 'number') return String(node.value);
+        if (node.kind === 'identifier') return node.name;
+        return undefined;
     }
 
     /**

@@ -4,6 +4,9 @@ import cors from 'cors';
 import { Server } from 'http';
 import { CodeGraph } from '../types';
 
+// Callback type for highlight requests from web UI
+export type HighlightCallback = (filePath: string, line: number, column?: number) => void;
+
 export class GraphServer {
     private app: express.Application;
     private server?: Server;
@@ -15,7 +18,10 @@ export class GraphServer {
         inheritance?: CodeGraph;
         dataflow?: CodeGraph;
         attackchain?: CodeGraph;
+        popchains?: any;
     } = {};
+    private currentFilePath: string = '';
+    private highlightCallback?: HighlightCallback;
 
     constructor(port: number = 3000, webDirectory?: string) {
         this.port = port;
@@ -132,6 +138,39 @@ export class GraphServer {
         this.app.get('/', (req, res) => {
             res.sendFile(path.join(this.webDir, 'index.html'));
         });
+
+        // Get POP chains data
+        this.app.get('/api/graph/popchains', (req, res) => {
+            if (this.currentGraphData.popchains) {
+                res.json(this.currentGraphData.popchains);
+            } else {
+                res.status(404).json({ error: 'No POP chain data available' });
+            }
+        });
+
+        // Highlight request from web UI - triggers VS Code to highlight
+        this.app.post('/api/highlight', (req, res) => {
+            const { line, column, nodeId, filePath } = req.body;
+            
+            if (line === undefined) {
+                res.status(400).json({ error: 'Missing line number' });
+                return;
+            }
+            
+            const targetFile = filePath || this.currentFilePath;
+            
+            if (this.highlightCallback) {
+                this.highlightCallback(targetFile, line, column || 0);
+                res.json({ success: true, message: `Highlighting line ${line} in VS Code` });
+            } else {
+                res.status(500).json({ error: 'Highlight callback not registered' });
+            }
+        });
+
+        // Get current file path
+        this.app.get('/api/current-file', (req, res) => {
+            res.json({ filePath: this.currentFilePath });
+        });
     }
 
     async start(): Promise<boolean> {
@@ -171,8 +210,16 @@ export class GraphServer {
         });
     }
 
-    updateGraphData(type: 'code' | 'inheritance' | 'dataflow' | 'attackchain', graph: CodeGraph) {
+    updateGraphData(type: 'code' | 'inheritance' | 'dataflow' | 'attackchain' | 'popchains', graph: CodeGraph | any) {
         this.currentGraphData[type] = graph;
+    }
+
+    setCurrentFilePath(filePath: string) {
+        this.currentFilePath = filePath;
+    }
+
+    setHighlightCallback(callback: HighlightCallback) {
+        this.highlightCallback = callback;
     }
 
     getPort(): number {

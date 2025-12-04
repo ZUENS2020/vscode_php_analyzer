@@ -131,6 +131,20 @@ export interface GraphNodeMetadata {
     conditionType?: string;
     expression?: string;
     branches?: number;
+    // Extended metadata properties
+    visibility?: string;
+    isMagic?: boolean;
+    description?: string;
+    triggeredBy?: string;
+    usedAs?: string;
+    toVariable?: string;
+    dangerous?: boolean;
+    isParent?: boolean;
+    isInterface?: boolean;
+    entryType?: string;
+    exploitability?: number;
+    operation?: string;
+    [key: string]: any;  // Allow additional properties
 }
 
 export interface GraphEdge {
