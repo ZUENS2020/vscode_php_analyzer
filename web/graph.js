@@ -11,7 +11,20 @@ const NODE_COLORS = {
     'source': '#ff9f40',
     'sink': '#dc3545',
     'property': '#9966ff',
-    'serialization': '#ffcc00'
+    'serialization': '#ffcc00',
+    'entry': '#00ff00'
+};
+
+// Node shape mapping
+const NODE_SHAPES = {
+    'class': 'rectangle',
+    'method': 'ellipse',
+    'magic': 'diamond',
+    'source': 'hexagon',
+    'sink': 'octagon',
+    'property': 'triangle',
+    'serialization': 'round-rectangle',
+    'entry': 'star'
 };
 
 // Edge type color mapping
@@ -20,7 +33,28 @@ const EDGE_COLORS = {
     'calls': '#4a9eff',
     'extends': '#ff6b6b',
     'implements': '#6cbc6c',
-    'dataflow': '#ff9f40'
+    'dataflow': '#ff9f40',
+    'triggers': '#ff0000'
+};
+
+// Edge style mapping
+const EDGE_STYLES = {
+    'contains': 'dashed',
+    'calls': 'solid',
+    'extends': 'solid',
+    'implements': 'dashed',
+    'dataflow': 'dotted',
+    'triggers': 'solid'
+};
+
+// Edge width mapping
+const EDGE_WIDTHS = {
+    'contains': 1,
+    'calls': 2,
+    'extends': 3,
+    'implements': 2,
+    'dataflow': 2,
+    'triggers': 2
 };
 
 // Initialize Cytoscape
@@ -35,13 +69,31 @@ function initializeCytoscape() {
                     'background-color': function(ele) {
                         return NODE_COLORS[ele.data('type')] || '#999999';
                     },
+                    'shape': function(ele) {
+                        return NODE_SHAPES[ele.data('type')] || 'ellipse';
+                    },
                     'label': 'data(label)',
                     'color': '#333',
                     'text-valign': 'center',
                     'text-halign': 'center',
                     'font-size': '12px',
-                    'width': 40,
-                    'height': 40,
+                    'width': function(ele) {
+                        // Entry points are larger
+                        return ele.data('type') === 'entry' ? 60 : 
+                               ele.data('type') === 'class' ? 60 : 
+                               ele.data('type') === 'magic' ? 50 : 
+                               ele.data('type') === 'sink' ? 50 : 
+                               ele.data('type') === 'source' ? 50 : 
+                               ele.data('type') === 'property' ? 30 : 40;
+                    },
+                    'height': function(ele) {
+                        return ele.data('type') === 'entry' ? 60 : 
+                               ele.data('type') === 'class' ? 60 : 
+                               ele.data('type') === 'magic' ? 50 : 
+                               ele.data('type') === 'sink' ? 50 : 
+                               ele.data('type') === 'source' ? 50 : 
+                               ele.data('type') === 'property' ? 30 : 40;
+                    },
                     'border-width': 2,
                     'border-color': '#fff',
                     'text-outline-color': '#fff',
@@ -58,9 +110,14 @@ function initializeCytoscape() {
             {
                 selector: 'edge',
                 style: {
-                    'width': 2,
+                    'width': function(ele) {
+                        return EDGE_WIDTHS[ele.data('type')] || 2;
+                    },
                     'line-color': function(ele) {
                         return EDGE_COLORS[ele.data('type')] || '#999999';
+                    },
+                    'line-style': function(ele) {
+                        return EDGE_STYLES[ele.data('type')] || 'solid';
                     },
                     'target-arrow-color': function(ele) {
                         return EDGE_COLORS[ele.data('type')] || '#999999';
@@ -674,3 +731,154 @@ document.addEventListener('DOMContentLoaded', async function() {
     // Load default graph (code structure)
     loadGraphType('code');
 });
+
+// ============================================================================
+// Enhanced Filter and Highlight Functions
+// ============================================================================
+
+/**
+ * Show all nodes and edges
+ */
+function showAll() {
+    if (!cy) { return; }
+    cy.elements().removeClass('filtered highlighted');
+    showNotification('Showing all elements', 'info');
+}
+
+/**
+ * Show only inheritance relationships
+ */
+function showInheritance() {
+    if (!cy) { return; }
+    
+    cy.elements().addClass('filtered');
+    
+    // Show class nodes
+    cy.nodes().filter(n => n.data('type') === 'class').removeClass('filtered');
+    
+    // Show extends and implements edges
+    const inheritanceEdges = cy.edges().filter(e => 
+        e.data('type') === 'extends' || e.data('type') === 'implements'
+    );
+    
+    inheritanceEdges.removeClass('filtered');
+    inheritanceEdges.connectedNodes().removeClass('filtered');
+    
+    showNotification(`Showing ${inheritanceEdges.length} inheritance relationship(s)`, 'info');
+}
+
+/**
+ * Show only magic method chains
+ */
+function showMagicChain() {
+    if (!cy) { return; }
+    
+    cy.elements().addClass('filtered');
+    
+    // Show entry points
+    cy.nodes().filter(n => n.data('type') === 'entry').removeClass('filtered');
+    
+    // Show magic methods
+    cy.nodes().filter(n => n.data('type') === 'magic').removeClass('filtered');
+    
+    // Show trigger edges
+    const triggerEdges = cy.edges().filter(e => e.data('type') === 'triggers');
+    triggerEdges.removeClass('filtered');
+    triggerEdges.connectedNodes().removeClass('filtered');
+    
+    showNotification('Showing magic method trigger chains', 'info');
+}
+
+/**
+ * Show only data flow
+ */
+function showDataFlow() {
+    if (!cy) { return; }
+    
+    cy.elements().addClass('filtered');
+    
+    // Show sources, sinks, and properties
+    cy.nodes().filter(n => 
+        n.data('type') === 'source' || 
+        n.data('type') === 'sink' || 
+        n.data('type') === 'property'
+    ).removeClass('filtered');
+    
+    // Show dataflow edges
+    const dataflowEdges = cy.edges().filter(e => e.data('type') === 'dataflow');
+    dataflowEdges.removeClass('filtered');
+    dataflowEdges.connectedNodes().removeClass('filtered');
+    
+    showNotification('Showing data flow paths', 'info');
+}
+
+/**
+ * Highlight complete POP chains from entry to sink
+ */
+function highlightPOPChain() {
+    if (!cy) { return; }
+    
+    cy.elements().removeClass('highlighted');
+    
+    // Find all entry points
+    const entries = cy.nodes().filter(n => n.data('type') === 'entry');
+    
+    // Find all sinks
+    const sinks = cy.nodes().filter(n => n.data('type') === 'sink');
+    
+    if (entries.length === 0) {
+        showNotification('No entry points found', 'warning');
+        return;
+    }
+    
+    if (sinks.length === 0) {
+        showNotification('No sinks found', 'warning');
+        return;
+    }
+    
+    let pathCount = 0;
+    
+    // For each entry, find paths to sinks
+    entries.forEach(entry => {
+        sinks.forEach(sink => {
+            const dijkstra = cy.elements().dijkstra({
+                root: entry,
+                directed: true
+            });
+            
+            const path = dijkstra.pathTo(sink);
+            
+            if (path && path.length > 0) {
+                path.addClass('highlighted');
+                pathCount++;
+            }
+        });
+    });
+    
+    if (pathCount > 0) {
+        showNotification(`Highlighted ${pathCount} complete POP chain(s)`, 'success');
+    } else {
+        showNotification('No complete paths from entry to sink found', 'warning');
+    }
+}
+
+/**
+ * Filter to show only specific edge type
+ */
+function filterEdgeType(edgeType) {
+    if (!cy) { return; }
+    
+    if (edgeType === 'all') {
+        cy.elements().removeClass('filtered');
+        showNotification('Showing all edges', 'info');
+        return;
+    }
+    
+    cy.elements().addClass('filtered');
+    
+    const edges = cy.edges().filter(e => e.data('type') === edgeType);
+    edges.removeClass('filtered');
+    edges.connectedNodes().removeClass('filtered');
+    
+    showNotification(`Filtered to show ${edges.length} ${edgeType} edge(s)`, 'info');
+}

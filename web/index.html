@@ -108,6 +108,10 @@
                         <h5 class="mt-3">Legend</h5>
                         <div class="legend">
                             <div class="legend-item">
+                                <span class="legend-color" style="background-color: #00ff00;"></span>
+                                <span>Entry Point (unserialize)</span>
+                            </div>
+                            <div class="legend-item">
                                 <span class="legend-color" style="background-color: #4a9eff;"></span>
                                 <span>Class</span>
                             </div>
@@ -127,7 +131,57 @@
                                 <span class="legend-color" style="background-color: #dc3545;"></span>
                                 <span>Sink</span>
                             </div>
+                            <div class="legend-item">
+                                <span class="legend-color" style="background-color: #9966ff;"></span>
+                                <span>Property</span>
+                            </div>
+                            
+                            <h6 class="mt-3">Edge Types</h6>
+                            <div class="legend-item">
+                                <span class="edge-legend" style="border-top: 3px solid #ff6b6b;"></span>
+                                <span>extends</span>
+                            </div>
+                            <div class="legend-item">
+                                <span class="edge-legend" style="border-top: 2px dashed #6cbc6c;"></span>
+                                <span>implements</span>
+                            </div>
+                            <div class="legend-item">
+                                <span class="edge-legend" style="border-top: 2px solid #ff0000;"></span>
+                                <span>triggers</span>
+                            </div>
+                            <div class="legend-item">
+                                <span class="edge-legend" style="border-top: 2px solid #4a9eff;"></span>
+                                <span>calls</span>
+                            </div>
+                            <div class="legend-item">
+                                <span class="edge-legend" style="border-top: 2px dotted #ff9f40;"></span>
+                                <span>dataflow</span>
+                            </div>
+                            <div class="legend-item">
+                                <span class="edge-legend" style="border-top: 1px dashed #999999;"></span>
+                                <span>contains</span>
+                            </div>
                         </div>
+                        
+                        <h5 class="mt-3">View Controls</h5>
+                        <div class="btn-group-vertical w-100 mb-3" role="group">
+                            <button type="button" class="btn btn-sm btn-outline-primary" onclick="showAll()">Show All</button>
+                            <button type="button" class="btn btn-sm btn-outline-primary" onclick="showInheritance()">Inheritance Only</button>
+                            <button type="button" class="btn btn-sm btn-outline-primary" onclick="showMagicChain()">Magic Method Chain</button>
+                            <button type="button" class="btn btn-sm btn-outline-primary" onclick="showDataFlow()">Data Flow Only</button>
+                            <button type="button" class="btn btn-sm btn-danger" onclick="highlightPOPChain()">Highlight POP Chain</button>
+                        </div>
+                        
+                        <h5 class="mt-3">Edge Filter</h5>
+                        <select class="form-select mb-2" onchange="filterEdgeType(this.value)">
+                            <option value="all">All Edges</option>
+                            <option value="extends">Extends Only</option>
+                            <option value="implements">Implements Only</option>
+                            <option value="triggers">Triggers Only</option>
+                            <option value="calls">Calls Only</option>
+                            <option value="dataflow">Data Flow Only</option>
+                            <option value="contains">Contains Only</option>
+                        </select>
 
                         <h5 class="mt-3">Node Details</h5>
                         <div id="nodeDetails" class="node-details">

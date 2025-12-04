@@ -112,7 +112,7 @@ export interface VariableReference {
 export interface GraphNode {
     id: string;
     label: string;
-    type: 'class' | 'method' | 'property' | 'magic' | 'serialization' | 'sink' | 'source';
+    type: 'class' | 'method' | 'property' | 'magic' | 'serialization' | 'sink' | 'source' | 'entry';
     metadata?: GraphNodeMetadata;
 }
 
@@ -136,7 +136,7 @@ export interface GraphNodeMetadata {
 export interface GraphEdge {
     source: string;
     target: string;
-    type: 'contains' | 'calls' | 'extends' | 'implements' | 'dataflow';
+    type: 'contains' | 'calls' | 'extends' | 'implements' | 'dataflow' | 'triggers';
     label?: string;
     metadata?: GraphEdgeMetadata;
 }

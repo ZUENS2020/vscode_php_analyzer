@@ -7,6 +7,21 @@ export class POPChainDetector {
     private analyzer: PHPAnalyzer;
     private maxDepth: number;
 
+    // Magic method trigger patterns
+    private readonly triggerPatterns = {
+        '__invoke': ['call_user_func', 'call_user_func_array', 'variable_as_function'],
+        '__toString': ['echo', 'print', 'string_concat'],
+        '__get': ['property_read'],
+        '__set': ['property_write'],
+        '__call': ['undefined_method_call'],
+        '__destruct': ['unset', 'end_of_scope'],
+        '__wakeup': ['unserialize'],
+        '__sleep': ['serialize'],
+        '__clone': ['clone'],
+        '__isset': ['isset', 'empty'],
+        '__unset': ['unset']
+    };
+
     constructor(ast: any, maxDepth: number = 5) {
         this.ast = ast;
         this.analyzer = new PHPAnalyzer('');
@@ -194,5 +209,65 @@ export class POPChainDetector {
         details += `\nDescription: ${chain.description}`;
         
         return details;
+    }
+
+    /**
+     * Identify which magic method would be triggered by a given operation
+     */
+    identifyTrigger(operation: string): string[] {
+        const triggers: string[] = [];
+        
+        for (const [magicMethod, patterns] of Object.entries(this.triggerPatterns)) {
+            for (const pattern of patterns) {
+                if (operation.includes(pattern) || pattern === operation) {
+                    triggers.push(magicMethod);
+                }
+            }
+        }
+        
+        return triggers;
+    }
+
+    /**
+     * Check if a node is a magic method trigger point
+     */
+    isMagicMethodTrigger(node: any): { isTrigger: boolean; triggeredMethod: string; pattern: string } {
+        let isTrigger = false;
+        let triggeredMethod = '';
+        let pattern = '';
+
+        if (node.kind === 'call') {
+            const funcName = node.what?.name || '';
+            
+            // Check for unserialize (triggers __wakeup)
+            if (funcName === 'unserialize') {
+                return { isTrigger: true, triggeredMethod: '__wakeup', pattern: 'unserialize' };
+            }
+            
+            // Check for call_user_func (triggers __invoke)
+            if (funcName === 'call_user_func' || funcName === 'call_user_func_array') {
+                return { isTrigger: true, triggeredMethod: '__invoke', pattern: funcName };
+            }
+
+            // Dynamic function call like $var() triggers __invoke
+            if (node.what && (node.what.kind === 'variable' || node.what.kind === 'propertylookup')) {
+                return { isTrigger: true, triggeredMethod: '__invoke', pattern: 'variable_as_function' };
+            }
+        }
+
+        // Property assignment triggers __set
+        if (node.kind === 'propertylookup' && this.isInWriteContext(node)) {
+            return { isTrigger: true, triggeredMethod: '__set', pattern: 'property_write' };
+        }
+
+        return { isTrigger, triggeredMethod, pattern };
+    }
+
+    /**
+     * Check if a property lookup is in a write context (assignment)
+     */
+    private isInWriteContext(node: any): boolean {
+        // This is a simplified check - ideally we'd track parent nodes
+        return true;
     }
 }
