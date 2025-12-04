@@ -249,14 +249,44 @@ function clearGraph() {
 function handleNodeClick(node) {
     const data = node.data();
     
-    // Update node details panel
+    // Update node details panel - safely escape HTML
     const detailsDiv = document.getElementById('nodeDetails');
-    detailsDiv.innerHTML = `
-        <h6>${data.label}</h6>
-        <p><span class="badge bg-primary">${data.type}</span></p>
-        <p><strong>ID:</strong> ${data.id}</p>
-        ${data.metadata ? `<p><strong>Additional Info:</strong> ${JSON.stringify(data.metadata, null, 2)}</p>` : ''}
-    `;
+    
+    // Clear previous content
+    detailsDiv.innerHTML = '';
+    
+    // Create elements safely
+    const h6 = document.createElement('h6');
+    h6.textContent = data.label;
+    detailsDiv.appendChild(h6);
+    
+    const typeBadge = document.createElement('p');
+    const badge = document.createElement('span');
+    badge.className = 'badge bg-primary';
+    badge.textContent = data.type;
+    typeBadge.appendChild(badge);
+    detailsDiv.appendChild(typeBadge);
+    
+    const idPara = document.createElement('p');
+    const idStrong = document.createElement('strong');
+    idStrong.textContent = 'ID: ';
+    idPara.appendChild(idStrong);
+    idPara.appendChild(document.createTextNode(data.id));
+    detailsDiv.appendChild(idPara);
+    
+    // Add metadata if present
+    if (data.metadata) {
+        const metaPara = document.createElement('p');
+        const metaStrong = document.createElement('strong');
+        metaStrong.textContent = 'Additional Info: ';
+        metaPara.appendChild(metaStrong);
+        
+        const metaPre = document.createElement('pre');
+        metaPre.style.fontSize = '12px';
+        metaPre.textContent = JSON.stringify(data.metadata, null, 2);
+        metaPara.appendChild(metaPre);
+        detailsDiv.appendChild(metaPara);
+    }
 }
 
 // Clear node selection
@@ -267,7 +297,7 @@ function clearNodeSelection() {
 
 // Filter nodes based on search
 function filterNodes() {
-    if (!cy) {return;}
+    if (!cy) { return; }
     
     const searchTerm = document.getElementById('searchInput').value.toLowerCase();
     

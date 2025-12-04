@@ -8,6 +8,7 @@ export class GraphServer {
     private app: express.Application;
     private server?: Server;
     private port: number;
+    private webDir: string;
     private analysisData: Map<string, any> = new Map();
     private currentGraphData: {
         code?: CodeGraph;
@@ -16,8 +17,10 @@ export class GraphServer {
         attackchain?: CodeGraph;
     } = {};
 
-    constructor(port: number = 3000) {
+    constructor(port: number = 3000, webDirectory?: string) {
         this.port = port;
+        // Allow custom web directory or compute default based on output structure
+        this.webDir = webDirectory || path.join(__dirname, '..', '..', 'web');
         this.app = express();
         this.setupMiddleware();
         this.setupRoutes();
@@ -28,8 +31,7 @@ export class GraphServer {
         this.app.use(express.json());
         
         // Serve static files from web directory
-        const webDir = path.join(__dirname, '..', '..', 'web');
-        this.app.use(express.static(webDir));
+        this.app.use(express.static(this.webDir));
     }
 
     private setupRoutes() {
@@ -101,7 +103,7 @@ export class GraphServer {
 
         // Serve main page
         this.app.get('/', (req, res) => {
-            res.sendFile(path.join(__dirname, '..', '..', 'web', 'index.html'));
+            res.sendFile(path.join(this.webDir, 'index.html'));
         });
     }
 
