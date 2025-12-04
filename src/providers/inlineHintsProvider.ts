@@ -1,4 +1,5 @@
 import * as vscode from 'vscode';
+import { Location } from 'php-parser';
 import { VariableTracker } from '../analyzers/variableTracker';
 import { SerializationAnalyzer } from '../analyzers/serializationAnalyzer';
 
@@ -50,7 +51,7 @@ export class InlineHintsProvider implements vscode.InlayHintsProvider {
         return hints;
     }
 
-    private isInRange(location: any, range: vscode.Range): boolean {
+    private isInRange(location: Location, range: vscode.Range): boolean {
         const startLine = location.start.line - 1;
         const endLine = location.end.line - 1;
         

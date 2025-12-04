@@ -124,7 +124,8 @@ export class SerializationAnalyzer {
             }
 
             // Recursively check children
-            for (const key in n) {
+            const keys = Object.keys(n);
+            for (const key of keys) {
                 if (key === 'loc' || key === 'parent') {
                     continue;
                 }

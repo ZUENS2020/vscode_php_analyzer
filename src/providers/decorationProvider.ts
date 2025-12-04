@@ -1,4 +1,5 @@
 import * as vscode from 'vscode';
+import { Location } from 'php-parser';
 
 export class DecorationProvider {
     private variableReferenceDecoration: vscode.TextEditorDecorationType;
@@ -61,7 +62,7 @@ export class DecorationProvider {
         editor.setDecorations(this.dangerousPointDecoration, []);
     }
 
-    private locationToRange(location: any): vscode.Range {
+    private locationToRange(location: Location): vscode.Range {
         return new vscode.Range(
             new vscode.Position(location.start.line - 1, location.start.column),
             new vscode.Position(location.end.line - 1, location.end.column)
