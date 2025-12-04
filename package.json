@@ -1,0 +1,186 @@
+{
+  "name": "php-code-analyzer-ctf",
+  "displayName": "PHP Code Analyzer for CTF",
+  "description": "Advanced PHP security analyzer for CTF challenges - detect POP chains, vulnerabilities, and attack vectors",
+  "version": "0.2.0",
+  "publisher": "ZUENS2020",
+  "engines": {
+    "vscode": "^1.80.0"
+  },
+  "categories": [
+    "Programming Languages",
+    "Linters",
+    "Other"
+  ],
+  "activationEvents": [
+    "onLanguage:php"
+  ],
+  "main": "./out/extension.js",
+  "contributes": {
+    "commands": [
+      {
+        "command": "phpAnalyzer.trackVariableFlow",
+        "title": "PHP Analyzer: Track Variable Flow"
+      },
+      {
+        "command": "phpAnalyzer.analyzeClassRelations",
+        "title": "PHP Analyzer: Analyze Class Relations"
+      },
+      {
+        "command": "phpAnalyzer.showMagicMethods",
+        "title": "PHP Analyzer: Show Magic Methods"
+      },
+      {
+        "command": "phpAnalyzer.findSerializationPoints",
+        "title": "PHP Analyzer: Find Serialization Points"
+      },
+      {
+        "command": "phpAnalyzer.findPOPChain",
+        "title": "PHP Analyzer: Find POP Chain"
+      },
+      {
+        "command": "phpAnalyzer.fullSecurityAnalysis",
+        "title": "PHP Analyzer: Full Security Analysis",
+        "icon": "$(rocket)"
+      },
+      {
+        "command": "phpAnalyzer.analyzeAttackChains",
+        "title": "PHP Analyzer: Analyze Attack Chains"
+      },
+      {
+        "command": "phpAnalyzer.scanVulnerabilities",
+        "title": "PHP Analyzer: Scan Vulnerabilities"
+      },
+      {
+        "command": "phpAnalyzer.generateExploitPayload",
+        "title": "PHP Analyzer: Generate Exploit Payload"
+      },
+      {
+        "command": "phpAnalyzer.showCodeGraph",
+        "title": "PHP Analyzer: Show Code Graph"
+      },
+      {
+        "command": "phpAnalyzer.showInheritanceGraph",
+        "title": "PHP Analyzer: Show Inheritance Graph"
+      },
+      {
+        "command": "phpAnalyzer.showDataFlowGraph",
+        "title": "PHP Analyzer: Show Data Flow Graph"
+      }
+    ],
+    "menus": {
+      "editor/context": [
+        {
+          "command": "phpAnalyzer.trackVariableFlow",
+          "when": "resourceLangId == php",
+          "group": "phpAnalyzer@1"
+        },
+        {
+          "command": "phpAnalyzer.analyzeClassRelations",
+          "when": "resourceLangId == php",
+          "group": "phpAnalyzer@2"
+        },
+        {
+          "command": "phpAnalyzer.fullSecurityAnalysis",
+          "when": "resourceLangId == php",
+          "group": "phpAnalyzer@3"
+        },
+        {
+          "command": "phpAnalyzer.analyzeAttackChains",
+          "when": "resourceLangId == php",
+          "group": "phpAnalyzer@4"
+        },
+        {
+          "command": "phpAnalyzer.showCodeGraph",
+          "when": "resourceLangId == php",
+          "group": "phpAnalyzer@5"
+        }
+      ],
+      "editor/title": [
+        {
+          "command": "phpAnalyzer.fullSecurityAnalysis",
+          "when": "resourceLangId == php",
+          "group": "navigation"
+        }
+      ]
+    },
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "php-security-analyzer",
+          "title": "PHP Security Analyzer",
+          "icon": "$(shield)"
+        }
+      ]
+    },
+    "views": {
+      "php-security-analyzer": [
+        {
+          "id": "phpAnalysisResults",
+          "name": "Analysis Results"
+        },
+        {
+          "id": "phpCodeGraph",
+          "name": "Code Graph",
+          "type": "webview"
+        }
+      ]
+    },
+    "configuration": {
+      "title": "PHP Analyzer",
+      "properties": {
+        "phpAnalyzer.enableInlineHints": {
+          "type": "boolean",
+          "default": true,
+          "description": "Show inline hints for variable types and dangerous patterns"
+        },
+        "phpAnalyzer.highlightDangerousPatterns": {
+          "type": "boolean",
+          "default": true,
+          "description": "Highlight dangerous code patterns with colored backgrounds"
+        },
+        "phpAnalyzer.showPOPChains": {
+          "type": "boolean",
+          "default": true,
+          "description": "Automatically detect and display POP chains"
+        },
+        "phpAnalyzer.autoAnalyzeOnOpen": {
+          "type": "boolean",
+          "default": false,
+          "description": "Automatically run vulnerability scan when opening PHP files"
+        },
+        "phpAnalyzer.maxChainDepth": {
+          "type": "number",
+          "default": 5,
+          "minimum": 1,
+          "maximum": 10,
+          "description": "Maximum depth for POP chain and attack chain detection"
+        },
+        "phpAnalyzer.showGraphOnAnalysis": {
+          "type": "boolean",
+          "default": true,
+          "description": "Automatically show code graph after running Full Analysis"
+        }
+      }
+    }
+  },
+  "scripts": {
+    "vscode:prepublish": "npm run compile",
+    "compile": "tsc -p ./",
+    "watch": "tsc -watch -p ./",
+    "pretest": "npm run compile",
+    "lint": "eslint src --ext ts",
+    "test": "node ./out/test/runTest.js"
+  },
+  "devDependencies": {
+    "@types/node": "^18.0.0",
+    "@types/vscode": "^1.80.0",
+    "@typescript-eslint/eslint-plugin": "^6.0.0",
+    "@typescript-eslint/parser": "^6.0.0",
+    "eslint": "^8.0.0",
+    "typescript": "^5.0.0"
+  },
+  "dependencies": {
+    "php-parser": "^3.1.5"
+  }
+}
