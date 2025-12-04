@@ -4,6 +4,10 @@
   "description": "Advanced PHP security analyzer for CTF challenges - detect POP chains, vulnerabilities, and attack vectors",
   "version": "0.2.0",
   "publisher": "ZUENS2020",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/ZUENS2020/vscode_php_highlighter.git"
+  },
   "engines": {
     "vscode": "^1.80.0"
   },
