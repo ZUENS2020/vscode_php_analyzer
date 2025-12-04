@@ -102,6 +102,8 @@ export class GraphServer {
         });
 
         // Serve main page
+        // Note: Rate limiting is not required as this server only listens on localhost
+        // and is exclusively for use by the VS Code extension's graph visualization
         this.app.get('/', (req, res) => {
             res.sendFile(path.join(this.webDir, 'index.html'));
         });
@@ -110,7 +112,8 @@ export class GraphServer {
     async start(): Promise<boolean> {
         return new Promise((resolve) => {
             try {
-                this.server = this.app.listen(this.port, () => {
+                // Explicitly bind to localhost only for security
+                this.server = this.app.listen(this.port, 'localhost', () => {
                     console.log(`Graph server running on http://localhost:${this.port}`);
                     resolve(true);
                 });
