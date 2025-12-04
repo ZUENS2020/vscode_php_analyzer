@@ -4,6 +4,8 @@ import { DataFlowAnalyzer } from '../analyzers/dataFlowAnalyzer';
 import { ObjectRelationAnalyzer } from '../analyzers/objectRelationAnalyzer';
 import { CallGraphAnalyzer } from '../analyzers/callGraphAnalyzer';
 import { ConditionalPathAnalyzer } from '../analyzers/conditionalPathAnalyzer';
+import { MagicMethodChainAnalyzer } from '../analyzers/magicMethodChainAnalyzer';
+import { PHPAnalyzer } from '../analyzers/phpAnalyzer';
 
 export class CodeGraphProvider implements vscode.WebviewViewProvider {
     private _view?: vscode.WebviewView;
@@ -70,38 +72,239 @@ export class CodeGraphProvider implements vscode.WebviewViewProvider {
     public buildCodeGraph(ast: any, document: vscode.TextDocument): CodeGraph {
         const nodes: GraphNode[] = [];
         const edges: GraphEdge[] = [];
+        const nodeIds = new Set<string>();
 
-        // Simplified graph building - add classes and methods
-        if (ast.children) {
-            for (const child of ast.children) {
-                if (child.kind === 'class') {
-                    const className = child.name?.name || 'Unknown';
+        const phpAnalyzer = new PHPAnalyzer('');
+        phpAnalyzer['ast'] = ast;
+
+        // 1. Add unserialize entry points
+        const magicAnalyzer = new MagicMethodChainAnalyzer(ast, document);
+        const unserializeEntries = magicAnalyzer.findUnserializeEntries();
+        
+        unserializeEntries.forEach((entry, index) => {
+            const entryId = `entry_unserialize_${index}`;
+            nodeIds.add(entryId);
+            nodes.push({
+                id: entryId,
+                label: 'unserialize($_GET[...])',
+                type: 'entry',
+                metadata: {
+                    line: entry.line,
+                    column: entry.column
+                }
+            });
+        });
+
+        // 2. Add all class nodes with inheritance relationships
+        const classes = phpAnalyzer.getAllClasses();
+        const classMap = new Map<string, any>();
+        
+        for (const classNode of classes) {
+            const className = classNode.name?.name || 'Unknown';
+            classMap.set(className, classNode);
+            
+            const classId = `class_${className}`;
+            if (!nodeIds.has(classId)) {
+                nodeIds.add(classId);
+                nodes.push({
+                    id: classId,
+                    label: className,
+                    type: 'class',
+                    metadata: {
+                        line: phpAnalyzer.getNodeLocation(classNode)?.line
+                    }
+                });
+            }
+
+            // Add extends relationship
+            if (classNode.extends) {
+                const parentName = classNode.extends.name || 'Unknown';
+                const parentId = `class_${parentName}`;
+                
+                // Add parent class node if not exists
+                if (!nodeIds.has(parentId)) {
+                    nodeIds.add(parentId);
                     nodes.push({
-                        id: `class_${className}`,
-                        label: className,
+                        id: parentId,
+                        label: parentName,
                         type: 'class'
                     });
+                }
 
-                    if (child.body) {
-                        for (const member of child.body) {
-                            if (member.kind === 'method') {
-                                const methodName = member.name?.name || member.name || 'unknown';
-                                const methodId = `method_${className}_${methodName}`;
-                                
-                                nodes.push({
-                                    id: methodId,
-                                    label: methodName,
-                                    type: this.isMagicMethod(methodName) ? 'magic' : 'method'
-                                });
+                edges.push({
+                    source: classId,
+                    target: parentId,
+                    type: 'extends',
+                    label: 'extends'
+                });
+            }
 
-                                edges.push({
-                                    source: `class_${className}`,
-                                    target: methodId,
-                                    type: 'contains'
-                                });
-                            }
-                        }
+            // Add implements relationships
+            if (classNode.implements) {
+                for (const iface of classNode.implements) {
+                    const ifaceName = iface.name || 'Unknown';
+                    const ifaceId = `interface_${ifaceName}`;
+                    
+                    if (!nodeIds.has(ifaceId)) {
+                        nodeIds.add(ifaceId);
+                        nodes.push({
+                            id: ifaceId,
+                            label: ifaceName,
+                            type: 'class'
+                        });
                     }
+
+                    edges.push({
+                        source: classId,
+                        target: ifaceId,
+                        type: 'implements',
+                        label: 'implements'
+                    });
+                }
+            }
+        }
+
+        // 3. Add method nodes and analyze magic method chains
+        const magicChains = magicAnalyzer.traceChains();
+        
+        for (const classNode of classes) {
+            const className = classNode.name?.name || 'Unknown';
+            const classId = `class_${className}`;
+            
+            if (!classNode.body) {
+                continue;
+            }
+
+            for (const member of classNode.body) {
+                if (member.kind === 'method') {
+                    const methodName = member.name?.name || member.name || 'unknown';
+                    const methodId = `method_${className}_${methodName}`;
+                    const isMagic = this.isMagicMethod(methodName);
+                    
+                    if (!nodeIds.has(methodId)) {
+                        nodeIds.add(methodId);
+                        nodes.push({
+                            id: methodId,
+                            label: `${className}::${methodName}`,
+                            type: isMagic ? 'magic' : 'method',
+                            metadata: {
+                                line: phpAnalyzer.getNodeLocation(member)?.line
+                            }
+                        });
+                    }
+
+                    edges.push({
+                        source: classId,
+                        target: methodId,
+                        type: 'contains'
+                    });
+
+                    // Connect unserialize to __wakeup
+                    if (methodName === '__wakeup' && unserializeEntries.length > 0) {
+                        unserializeEntries.forEach((entry, index) => {
+                            edges.push({
+                                source: `entry_unserialize_${index}`,
+                                target: methodId,
+                                type: 'triggers',
+                                label: 'triggers'
+                            });
+                        });
+                    }
+                }
+            }
+        }
+
+        // 4. Add magic method trigger chains
+        for (const chain of magicChains) {
+            // Extract className and methodName from chain.entryPoint (format: "ClassName::methodName")
+            const parts = chain.entryPoint.split('::');
+            const entryClassName = parts[0];
+            const entryMethodName = parts[1];
+            const entryNodeId = `method_${entryClassName}_${entryMethodName}`;
+
+            for (const trigger of chain.chain) {
+                if (trigger.methodName.startsWith('__')) {
+                    const triggerId = `trigger_${trigger.className}_${trigger.methodName}_${trigger.line}`;
+                    
+                    if (!nodeIds.has(triggerId)) {
+                        nodeIds.add(triggerId);
+                        nodes.push({
+                            id: triggerId,
+                            label: `${trigger.className}::${trigger.methodName}`,
+                            type: 'magic',
+                            metadata: {
+                                line: trigger.line,
+                                column: trigger.column
+                            }
+                        });
+                    }
+
+                    // Connect the entry method to the triggered magic method
+                    if (nodeIds.has(entryNodeId)) {
+                        edges.push({
+                            source: entryNodeId,
+                            target: triggerId,
+                            type: 'triggers',
+                            label: trigger.triggeredBy
+                        });
+                    }
+                }
+            }
+
+            // 5. Add property flow nodes
+            for (const flow of chain.propertyFlows) {
+                const propId = `prop_${flow.fromClass}_${flow.propertyName}`;
+                
+                if (!nodeIds.has(propId)) {
+                    nodeIds.add(propId);
+                    nodes.push({
+                        id: propId,
+                        label: `$this->${flow.propertyName}`,
+                        type: 'property',
+                        metadata: {
+                            line: flow.line,
+                            column: flow.column
+                        }
+                    });
+                }
+
+                // Connect property to the method that uses it
+                if (nodeIds.has(entryNodeId)) {
+                    edges.push({
+                        source: `class_${flow.fromClass}`,
+                        target: propId,
+                        type: 'contains'
+                    });
+
+                    edges.push({
+                        source: propId,
+                        target: entryNodeId,
+                        type: 'dataflow',
+                        label: `flows to ${flow.toVariable}`
+                    });
+                }
+            }
+
+            // 6. Add dangerous sink nodes
+            for (const sink of chain.dangerousSinks) {
+                const sinkId = `sink_${sink}_${chain.entryPoint}`;
+                
+                if (!nodeIds.has(sinkId)) {
+                    nodeIds.add(sinkId);
+                    nodes.push({
+                        id: sinkId,
+                        label: `${sink}()`,
+                        type: 'sink'
+                    });
+                }
+
+                if (nodeIds.has(entryNodeId)) {
+                    edges.push({
+                        source: entryNodeId,
+                        target: sinkId,
+                        type: 'calls',
+                        label: 'calls'
+                    });
                 }
             }
         }
