@@ -86,17 +86,39 @@ Advanced PHP security analyzer for CTF challenges - detect POP chains, vulnerabi
 
 **Command:** `PHP Analyzer: Full Security Analysis`
 
-### 🗺️ Code Visualization
+### 🗺️ Interactive Graph Visualization
+- **Browser-based** interactive graph visualization
 - **Code Structure Graph**: Classes, methods, and relationships
 - **Inheritance Graph**: Class hierarchy visualization
 - **Data Flow Graph**: Track data from sources to sinks
-- Interactive zoom and pan
-- Click nodes to jump to code
+- **Attack Chain Graph**: Visualize attack paths and exploits
+- Interactive zoom, pan, search, and filter
+- Export graphs as PNG images
+- Real-time updates from VS Code
+
+**Features:**
+- Powered by Cytoscape.js for high-performance rendering
+- Bootstrap 5 responsive UI
+- Runs on local Express server (localhost only)
+- Automatic browser launch
+- Search and filter nodes
+- Click to see node details
 
 **Commands:**
 - `PHP Analyzer: Show Code Graph`
 - `PHP Analyzer: Show Inheritance Graph`
 - `PHP Analyzer: Show Data Flow Graph`
+- `PHP Analyzer: Analyze Attack Chains` (includes graph)
+
+**Configuration:**
+```json
+{
+  "phpAnalyzer.graphServerPort": 3000,
+  "phpAnalyzer.showGraphOnAnalysis": true
+}
+```
+
+See [GRAPH_VISUALIZATION.md](GRAPH_VISUALIZATION.md) for detailed documentation.
 
 ## Installation
 
