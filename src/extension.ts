@@ -122,7 +122,7 @@ async function getActivePhpDocument(): Promise<{ document: vscode.TextDocument; 
 
 async function trackVariableFlow(provider: AnalysisResultsProvider) {
     const docInfo = await getActivePhpDocument();
-    if (!docInfo) return;
+    if (!docInfo) {return;}
 
     const editor = vscode.window.activeTextEditor!;
     const selection = editor.selection;
@@ -147,7 +147,7 @@ async function trackVariableFlow(provider: AnalysisResultsProvider) {
 
 async function analyzeClassRelations(provider: AnalysisResultsProvider) {
     const docInfo = await getActivePhpDocument();
-    if (!docInfo) return;
+    if (!docInfo) {return;}
 
     const editor = vscode.window.activeTextEditor!;
     const selection = editor.selection;
@@ -172,7 +172,7 @@ async function analyzeClassRelations(provider: AnalysisResultsProvider) {
 
 async function showMagicMethods(provider: AnalysisResultsProvider) {
     const docInfo = await getActivePhpDocument();
-    if (!docInfo) return;
+    if (!docInfo) {return;}
 
     try {
         const analyzer = new PHPAnalyzer(docInfo.text);
@@ -188,7 +188,7 @@ async function showMagicMethods(provider: AnalysisResultsProvider) {
 
 async function findSerializationPoints(provider: AnalysisResultsProvider) {
     const docInfo = await getActivePhpDocument();
-    if (!docInfo) return;
+    if (!docInfo) {return;}
 
     try {
         const analyzer = new PHPAnalyzer(docInfo.text);
@@ -204,7 +204,7 @@ async function findSerializationPoints(provider: AnalysisResultsProvider) {
 
 async function findPOPChain(provider: AnalysisResultsProvider) {
     const docInfo = await getActivePhpDocument();
-    if (!docInfo) return;
+    if (!docInfo) {return;}
 
     try {
         const config = vscode.workspace.getConfiguration('phpAnalyzer');
@@ -223,7 +223,7 @@ async function findPOPChain(provider: AnalysisResultsProvider) {
 
 async function fullSecurityAnalysis(provider: AnalysisResultsProvider, graphProvider: CodeGraphProvider) {
     const docInfo = await getActivePhpDocument();
-    if (!docInfo) return;
+    if (!docInfo) {return;}
 
     const progress = await vscode.window.withProgress({
         location: vscode.ProgressLocation.Notification,
@@ -283,7 +283,7 @@ async function fullSecurityAnalysis(provider: AnalysisResultsProvider, graphProv
 
 async function analyzeAttackChains(provider: AnalysisResultsProvider, graphProvider: CodeGraphProvider) {
     const docInfo = await getActivePhpDocument();
-    if (!docInfo) return;
+    if (!docInfo) {return;}
 
     try {
         const config = vscode.workspace.getConfiguration('phpAnalyzer');
@@ -306,7 +306,7 @@ async function analyzeAttackChains(provider: AnalysisResultsProvider, graphProvi
 
 async function scanVulnerabilities(provider: AnalysisResultsProvider) {
     const docInfo = await getActivePhpDocument();
-    if (!docInfo) return;
+    if (!docInfo) {return;}
 
     try {
         const analyzer = new PHPAnalyzer(docInfo.text);
@@ -322,7 +322,7 @@ async function scanVulnerabilities(provider: AnalysisResultsProvider) {
 
 async function generateExploitPayload() {
     const docInfo = await getActivePhpDocument();
-    if (!docInfo) return;
+    if (!docInfo) {return;}
 
     try {
         const analyzer = new PHPAnalyzer(docInfo.text);
@@ -354,7 +354,7 @@ async function generateExploitPayload() {
 
 async function showCodeGraph(provider: CodeGraphProvider) {
     const docInfo = await getActivePhpDocument();
-    if (!docInfo) return;
+    if (!docInfo) {return;}
 
     try {
         const analyzer = new PHPAnalyzer(docInfo.text);
@@ -366,7 +366,7 @@ async function showCodeGraph(provider: CodeGraphProvider) {
 
 async function showInheritanceGraph(provider: CodeGraphProvider) {
     const docInfo = await getActivePhpDocument();
-    if (!docInfo) return;
+    if (!docInfo) {return;}
 
     try {
         const analyzer = new PHPAnalyzer(docInfo.text);
@@ -378,7 +378,7 @@ async function showInheritanceGraph(provider: CodeGraphProvider) {
 
 async function showDataFlowGraph(provider: CodeGraphProvider) {
     const docInfo = await getActivePhpDocument();
-    if (!docInfo) return;
+    if (!docInfo) {return;}
 
     try {
         const analyzer = new PHPAnalyzer(docInfo.text);

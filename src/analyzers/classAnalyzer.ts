@@ -192,7 +192,7 @@ export class ClassAnalyzer {
     }
 
     private extractDefaultValue(valueNode: any): string {
-        if (!valueNode) return 'null';
+        if (!valueNode) {return 'null';}
         
         switch (valueNode.kind) {
             case 'string':
