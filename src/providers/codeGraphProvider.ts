@@ -208,10 +208,22 @@ export class CodeGraphProvider implements vscode.WebviewViewProvider {
             dataFlowAnalysis.entities.forEach((entity: Entity) => {
                 // Skip sources and sinks (already added)
                 if (entity.type !== 'source' && entity.type !== 'sink') {
+                    // Map entity type to GraphNode type
+                    let nodeType: GraphNode['type'] = 'method';
+                    if (entity.type === 'function') {
+                        nodeType = 'method';
+                    } else if (entity.type === 'object') {
+                        nodeType = 'class';
+                    } else if (entity.type === 'variable') {
+                        nodeType = 'property';
+                    } else if (entity.type === 'transformer') {
+                        nodeType = 'method';
+                    }
+                    
                     nodes.push({
                         id: entity.id,
                         label: entity.name,
-                        type: entity.type as any,
+                        type: nodeType,
                         metadata: {
                             isTainted: entity.isTainted,
                             line: entity.line,
@@ -233,7 +245,7 @@ export class CodeGraphProvider implements vscode.WebviewViewProvider {
                         isTainted: rel.isTainted,
                         conditions: rel.conditions
                     }
-                } as any);
+                });
             });
 
             // Add data flow paths as highlighted edges
@@ -250,7 +262,7 @@ export class CodeGraphProvider implements vscode.WebviewViewProvider {
                             vulnerabilityType: path.vulnerabilityType,
                             severity: path.severity
                         }
-                    } as any);
+                    });
 
                     // Connect path nodes
                     for (let i = 0; i < path.path.length - 1; i++) {
@@ -262,7 +274,7 @@ export class CodeGraphProvider implements vscode.WebviewViewProvider {
                             metadata: {
                                 isTainted: path.isTainted
                             }
-                        } as any);
+                        });
                     }
 
                     // Connect last path node to sink
@@ -277,7 +289,7 @@ export class CodeGraphProvider implements vscode.WebviewViewProvider {
                                 vulnerabilityType: path.vulnerabilityType,
                                 severity: path.severity
                             }
-                        } as any);
+                        });
                     }
                 } else {
                     // Direct connection from source to sink
@@ -291,7 +303,7 @@ export class CodeGraphProvider implements vscode.WebviewViewProvider {
                             vulnerabilityType: path.vulnerabilityType,
                             severity: path.severity
                         }
-                    } as any);
+                    });
                 }
             });
 
@@ -400,7 +412,7 @@ export class CodeGraphProvider implements vscode.WebviewViewProvider {
                         isTainted: call.isTainted,
                         arguments: call.arguments
                     }
-                } as any);
+                });
             });
 
             // Run conditional path analysis
