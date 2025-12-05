@@ -1,9 +1,10 @@
-# PHP Security Analyzer for CTF
+# PHP Security Analyzer
 
 🔒 专为 CTF 竞赛设计的 PHP 安全分析插件，自动检测漏洞、分析 POP 链、生成利用 Payload。
 
 ![VS Code](https://img.shields.io/badge/VS%20Code-^1.80.0-blue)
 ![License](https://img.shields.io/badge/license-MIT-green)
+![Version](https://img.shields.io/badge/version-1.0.0-orange)
 
 ## ✨ 功能特性
 
@@ -42,8 +43,8 @@ code --install-extension php-code-analyzer-ctf-x.x.x.vsix
 
 ### 从源码构建
 ```bash
-git clone https://github.com/ZUENS2020/vscode_php_highlighter.git
-cd vscode_php_highlighter
+git clone https://github.com/ZUENS2020/vscode_php_analyzer.git
+cd vscode_php_analyzer
 npm install
 npm run compile
 npx vsce package
@@ -106,15 +107,12 @@ npx vsce package
 
 ## 📝 更新日志
 
-### v0.3.5
-- 修复依赖打包问题
-- Maltego 风格 UI 优化
-- 改进图表渲染性能
-
-### v0.3.0
-- 新增完整漏洞检测
-- POP 链分析增强
-- Payload 生成器
+### v1.0.0
+- 首个正式版本
+- 完整的漏洞检测功能
+- POP 链自动分析
+- Maltego 风格代码结构图
+- Payload 自动生成
 
 ## 📄 许可证
 

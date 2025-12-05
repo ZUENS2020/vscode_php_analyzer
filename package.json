@@ -1,12 +1,12 @@
 {
-  "name": "php-code-analyzer-ctf",
-  "displayName": "PHP Code Analyzer for CTF",
-  "description": "Advanced PHP security analyzer for CTF challenges - detect POP chains, vulnerabilities, and attack vectors",
-  "version": "0.3.5",
+  "name": "vscode-php-analyzer",
+  "displayName": "PHP Security Analyzer",
+  "description": "PHP security analyzer for CTF - detect POP chains, vulnerabilities, and generate exploit payloads",
+  "version": "1.0.0",
   "publisher": "ZUENS2020",
   "repository": {
     "type": "git",
-    "url": "https://github.com/ZUENS2020/vscode_php_highlighter.git"
+    "url": "https://github.com/ZUENS2020/vscode_php_analyzer.git"
   },
   "engines": {
     "vscode": "^1.80.0"
