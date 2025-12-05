@@ -310,3 +310,152 @@ export interface ConditionalBranch {
     nodes: PathNode[];
     isTainted: boolean;
 }
+
+// ============================================================================
+// Multi-File Coordination Analysis Types
+// ============================================================================
+
+/**
+ * 代表单个PHP文件的分析信息
+ */
+export interface PhpFileInfo {
+    path: string;
+    uri: vscode.Uri;
+    content: string;
+    ast: any;
+    classes: ClassInfo[];
+    functions: FunctionInfo[];
+    interfaces: InterfaceInfo[];
+    namespaces: string[];
+    imports: ImportStatement[];
+    analysisDuration: number; // 毫秒
+}
+
+/**
+ * 函数信息
+ */
+export interface FunctionInfo {
+    name: string;
+    namespace?: string;
+    parameters: ParameterInfo[];
+    returnType?: string;
+    visibility?: 'public' | 'protected' | 'private';
+    isStatic?: boolean;
+    location: vscode.Location;
+}
+
+/**
+ * 接口信息
+ */
+export interface InterfaceInfo {
+    name: string;
+    namespace?: string;
+    extends?: string[];
+    methods: MethodInfo[];
+    location: vscode.Location;
+}
+
+/**
+ * 导入语句
+ */
+export interface ImportStatement {
+    type: 'use' | 'require' | 'include' | 'require_once' | 'include_once';
+    path: string;
+    namespace?: string;
+    alias?: string;
+    location: vscode.Location;
+}
+
+/**
+ * 多文件协同关系
+ */
+export interface FileCoordinationRelation {
+    source: string; // 源文件路径
+    target: string; // 目标文件路径
+    type: 'imports' | 'extends' | 'implements' | 'calls' | 'includes' | 'references';
+    items: CoordinationItem[]; // 具体的协同项
+    severity?: 'critical' | 'high' | 'medium' | 'low'; // 安全相关性
+}
+
+/**
+ * 协同项（类、函数、接口等）
+ */
+export interface CoordinationItem {
+    sourceIdentifier: string; // 源项目标识符
+    targetIdentifier: string; // 目标项目标识符
+    itemType: 'class' | 'function' | 'interface' | 'trait' | 'constant';
+    operation: string; // 操作类型：继承、调用、实现等
+    location: vscode.Location;
+    riskLevel?: 'critical' | 'high' | 'medium' | 'low'; // 潜在风险
+    vulnerabilities?: string[]; // 相关漏洞
+}
+
+/**
+ * 多文件分析结果
+ */
+export interface MultiFileAnalysisResult {
+    projectPath: string;
+    files: PhpFileInfo[];
+    relations: FileCoordinationRelation[];
+    globalVulnerabilities: Vulnerability[];
+    popChains: POPChain[]; // 跨文件POP链
+    dataFlowPaths: DataFlowPath[]; // 跨文件数据流
+    dependencyGraph: GraphNode[]; // 依赖图节点
+    dependencyEdges: GraphEdge[]; // 依赖图边
+    analysisTime: number; // 总分析时间
+    fileCount: number;
+    relationCount: number;
+}
+
+/**
+ * 云端编辑会话
+ */
+export interface CloudEditSession {
+    id: string;
+    projectPath: string;
+    files: CloudEditFile[];
+    changes: CloudEditChange[];
+    syncStatus: 'synced' | 'pending' | 'conflict';
+    lastSyncTime: number;
+    createdAt: number;
+    updatedAt: number;
+}
+
+/**
+ * 云端编辑文件
+ */
+export interface CloudEditFile {
+    path: string;
+    content: string;
+    version: number;
+    hash: string; // 内容哈希用于冲突检测
+    lastEditTime: number;
+}
+
+/**
+ * 云端编辑变更
+ */
+export interface CloudEditChange {
+    id: string;
+    filePath: string;
+    type: 'add' | 'modify' | 'delete';
+    oldContent?: string;
+    newContent?: string;
+    timestamp: number;
+    editor?: string;
+    lineStart?: number;
+    lineEnd?: number;
+}
+
+/**
+ * 云端编辑冲突
+ */
+export interface CloudEditConflict {
+    filePath: string;
+    localVersion: number;
+    remoteVersion: number;
+    localContent: string;
+    remoteContent: string;
+    proposedResolution?: string;
+    conflictType: 'content' | 'delete' | 'both';
+}
