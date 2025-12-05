@@ -2,7 +2,7 @@
   "name": "php-code-analyzer-ctf",
   "displayName": "PHP Code Analyzer for CTF",
   "description": "Advanced PHP security analyzer for CTF challenges - detect POP chains, vulnerabilities, and attack vectors",
-  "version": "0.2.0",
+  "version": "0.3.5",
   "publisher": "ZUENS2020",
   "repository": {
     "type": "git",
@@ -17,26 +17,15 @@
     "Other"
   ],
   "activationEvents": [
+    "onStartupFinished",
     "onLanguage:php"
   ],
   "main": "./out/extension.js",
   "contributes": {
     "commands": [
       {
-        "command": "phpAnalyzer.trackVariableFlow",
-        "title": "PHP Analyzer: Track Variable Flow"
-      },
-      {
         "command": "phpAnalyzer.analyzeClassRelations",
         "title": "PHP Analyzer: Analyze Class Relations"
-      },
-      {
-        "command": "phpAnalyzer.showMagicMethods",
-        "title": "PHP Analyzer: Show Magic Methods"
-      },
-      {
-        "command": "phpAnalyzer.findSerializationPoints",
-        "title": "PHP Analyzer: Find Serialization Points"
       },
       {
         "command": "phpAnalyzer.findPOPChain",
@@ -46,10 +35,6 @@
         "command": "phpAnalyzer.fullSecurityAnalysis",
         "title": "PHP Analyzer: Full Security Analysis",
         "icon": "$(rocket)"
-      },
-      {
-        "command": "phpAnalyzer.analyzeAttackChains",
-        "title": "PHP Analyzer: Analyze Attack Chains"
       },
       {
         "command": "phpAnalyzer.scanVulnerabilities",
@@ -62,42 +47,29 @@
       {
         "command": "phpAnalyzer.showCodeGraph",
         "title": "PHP Analyzer: Show Code Graph"
-      },
-      {
-        "command": "phpAnalyzer.showInheritanceGraph",
-        "title": "PHP Analyzer: Show Inheritance Graph"
-      },
-      {
-        "command": "phpAnalyzer.showDataFlowGraph",
-        "title": "PHP Analyzer: Show Data Flow Graph"
       }
     ],
     "menus": {
       "editor/context": [
         {
-          "command": "phpAnalyzer.trackVariableFlow",
+          "command": "phpAnalyzer.analyzeClassRelations",
           "when": "resourceLangId == php",
           "group": "phpAnalyzer@1"
         },
         {
-          "command": "phpAnalyzer.analyzeClassRelations",
+          "command": "phpAnalyzer.findPOPChain",
           "when": "resourceLangId == php",
           "group": "phpAnalyzer@2"
         },
         {
-          "command": "phpAnalyzer.fullSecurityAnalysis",
+          "command": "phpAnalyzer.scanVulnerabilities",
           "when": "resourceLangId == php",
           "group": "phpAnalyzer@3"
         },
         {
-          "command": "phpAnalyzer.analyzeAttackChains",
-          "when": "resourceLangId == php",
-          "group": "phpAnalyzer@4"
-        },
-        {
           "command": "phpAnalyzer.showCodeGraph",
           "when": "resourceLangId == php",
-          "group": "phpAnalyzer@5"
+          "group": "phpAnalyzer@4"
         }
       ],
       "editor/title": [
@@ -122,11 +94,6 @@
         {
           "id": "phpAnalysisResults",
           "name": "Analysis Results"
-        },
-        {
-          "id": "phpCodeGraph",
-          "name": "Code Graph",
-          "type": "webview"
         }
       ]
     },

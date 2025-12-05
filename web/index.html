@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>PHP Code Analyzer - Interactive Graph</title>
+    <title>PHP Security Graph</title>
     
     <!-- Bootstrap CSS -->
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
@@ -15,18 +15,15 @@
     <link rel="stylesheet" href="styles.css">
 </head>
 <body>
-    <nav class="navbar navbar-dark bg-dark">
+    <nav class="navbar navbar-dark" style="background-color: #11111b; padding: 8px 16px;">
         <div class="container-fluid">
-            <span class="navbar-brand mb-0 h1">
-                <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" fill="currentColor" class="bi bi-shield-check me-2" viewBox="0 0 16 16">
-                    <path d="M5.338 1.59a61.44 61.44 0 0 0-2.837.856.481.481 0 0 0-.328.39c-.554 4.157.726 7.19 2.253 9.188a10.725 10.725 0 0 0 2.287 2.233c.346.244.652.42.893.533.12.057.218.095.293.118a.55.55 0 0 0 .101.025.615.615 0 0 0 .1-.025c.076-.023.174-.061.294-.118.24-.113.547-.29.893-.533a10.726 10.726 0 0 0 2.287-2.233c1.527-1.997 2.807-5.031 2.253-9.188a.48.48 0 0 0-.328-.39c-.651-.213-1.75-.56-2.837-.855C9.552 1.29 8.531 1.067 8 1.067c-.53 0-1.552.223-2.662.524zM5.072.56C6.157.265 7.31 0 8 0s1.843.265 2.928.56c1.11.3 2.229.655 2.887.87a1.54 1.54 0 0 1 1.044 1.262c.596 4.477-.787 7.795-2.465 9.99a11.775 11.775 0 0 1-2.517 2.453 7.159 7.159 0 0 1-1.048.625c-.28.132-.581.24-.829.24s-.548-.108-.829-.24a7.158 7.158 0 0 1-1.048-.625 11.777 11.777 0 0 1-2.517-2.453C1.928 10.487.545 7.169 1.141 2.692A1.54 1.54 0 0 1 2.185 1.43 62.456 62.456 0 0 1 5.072.56z"/>
-                    <path d="M10.854 5.146a.5.5 0 0 1 0 .708l-3 3a.5.5 0 0 1-.708 0l-1.5-1.5a.5.5 0 1 1 .708-.708L7.5 7.793l2.646-2.647a.5.5 0 0 1 .708 0z"/>
-                </svg>
-                PHP Code Analyzer - Interactive Graph
+            <span class="navbar-brand mb-0" style="font-size: 14px; font-weight: 600; color: #89b4fa;">
+                🔒 PHP Security Graph
             </span>
-            <div class="d-flex">
-                <button class="btn btn-outline-light btn-sm me-2" onclick="exportGraph('png')">Export PNG</button>
-                <button class="btn btn-outline-light btn-sm" onclick="exportGraph('svg')">Export SVG</button>
+            <div class="d-flex align-items-center">
+                <span id="currentFile" class="text-muted me-3" style="font-size: 12px;"></span>
+                <button class="btn btn-outline-secondary btn-sm me-2" style="font-size: 11px;" onclick="exportGraph('png')">PNG</button>
+                <button class="btn btn-outline-secondary btn-sm" style="font-size: 11px;" onclick="exportGraph('svg')">SVG</button>
             </div>
         </div>
     </nav>
@@ -38,32 +35,13 @@
                 <div id="graph-container">
                     <div id="cy"></div>
                     
-                    <!-- Graph Controls -->
-                    <div class="graph-controls">
-                        <div class="btn-group-vertical" role="group">
-                            <button type="button" class="btn btn-sm btn-primary" onclick="zoomIn()" title="Zoom In">
-                                <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="currentColor" viewBox="0 0 16 16">
-                                    <path d="M8 4a.5.5 0 0 1 .5.5v3h3a.5.5 0 0 1 0 1h-3v3a.5.5 0 0 1-1 0v-3h-3a.5.5 0 0 1 0-1h3v-3A.5.5 0 0 1 8 4z"/>
-                                </svg>
-                            </button>
-                            <button type="button" class="btn btn-sm btn-primary" onclick="zoomOut()" title="Zoom Out">
-                                <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="currentColor" viewBox="0 0 16 16">
-                                    <path d="M4 8a.5.5 0 0 1 .5-.5h7a.5.5 0 0 1 0 1h-7A.5.5 0 0 1 4 8z"/>
-                                </svg>
-                            </button>
-                            <button type="button" class="btn btn-sm btn-primary" onclick="fitGraph()" title="Fit to Screen">
-                                <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="currentColor" viewBox="0 0 16 16">
-                                    <path d="M1 1h14v14H1V1zm1 1v12h12V2H2z"/>
-                                </svg>
-                            </button>
-                            <button type="button" class="btn btn-sm btn-primary" onclick="centerGraph()" title="Center">
-                                <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="currentColor" viewBox="0 0 16 16">
-                                    <path d="M8 15A7 7 0 1 1 8 1a7 7 0 0 1 0 14zm0 1A8 8 0 1 0 8 0a8 8 0 0 0 0 16z"/>
-                                    <path d="M8 4a.5.5 0 0 1 .5.5v3h3a.5.5 0 0 1 0 1h-3v3a.5.5 0 0 1-1 0v-3h-3a.5.5 0 0 1 0-1h3v-3A.5.5 0 0 1 8 4z"/>
-                                </svg>
-                            </button>
-                        </div>
+                    <!-- Zoom Controls - Bottom Right -->
+                    <div class="zoom-controls">
+                        <button class="btn" onclick="zoomIn()" title="Zoom In">+</button>
+                        <button class="btn" onclick="zoomOut()" title="Zoom Out">−</button>
+                        <button class="btn" onclick="fitGraph()" title="Fit">⊡</button>
                     </div>
+                                    <path d="M4 8a.5.5 0 0 1 .5-.5h7a.5.5 0 0 1 0 1h-7A.5.5 0 0 1 4 8z"/>
                 </div>
             </div>
 
@@ -72,46 +50,98 @@
                 <div class="sidebar">
                     <div class="p-3">
                         <h5>Graph Type</h5>
-                        <div class="btn-group-vertical w-100 mb-3" role="group">
-                            <button type="button" class="btn btn-outline-primary active" data-graph-type="code" onclick="loadGraphType('code')">Code Structure</button>
-                            <button type="button" class="btn btn-outline-primary" data-graph-type="inheritance" onclick="loadGraphType('inheritance')">Inheritance</button>
-                            <button type="button" class="btn btn-outline-primary" data-graph-type="dataflow" onclick="loadGraphType('dataflow')">Data Flow</button>
-                            <button type="button" class="btn btn-outline-primary" data-graph-type="attackchain" onclick="loadGraphType('attackchain')">Attack Chain</button>
-                            <button type="button" class="btn btn-outline-danger" data-graph-type="popchain" onclick="loadGraphType('popchain')">⛓️ POP Chain</button>
+                        <div class="btn-group w-100 mb-3" role="group">
+                            <button type="button" class="btn btn-outline-primary btn-sm active" data-graph-type="code" onclick="loadGraphType('code')">Structure</button>
+                            <button type="button" class="btn btn-outline-danger btn-sm" data-graph-type="popchain" onclick="loadGraphType('popchain')">POP Chain</button>
                         </div>
 
-                        <h5>Search & Filter</h5>
-                        <input type="text" class="form-control mb-2" id="searchInput" placeholder="Search nodes..." oninput="filterNodes()">
+                        <h5>Search</h5>
+                        <input type="text" class="form-control form-control-sm mb-2" id="searchInput" placeholder="Search..." oninput="filterNodes()">
                         
-                        <!-- Data Flow Analysis Controls -->
-                        <h5 class="mt-3">Data Flow Analysis</h5>
-                        <div class="btn-group-vertical w-100 mb-3" role="group">
-                            <button type="button" class="btn btn-sm btn-warning" onclick="highlightTaintPaths()">Highlight Taint Paths</button>
-                            <button type="button" class="btn btn-sm btn-danger" onclick="showCriticalPaths()">Show Critical Only</button>
-                            <button type="button" class="btn btn-sm btn-secondary" onclick="clearHighlighting()">Clear Highlighting</button>
-                        </div>
-                        
-                        <h5 class="mt-3">Filter by Type</h5>
-                        <select class="form-select mb-2" onchange="filterByType(this.value)">
-                            <option value="all">All Nodes</option>
-                            <option value="source">Sources Only</option>
-                            <option value="sink">Sinks Only</option>
-                            <option value="class">Classes Only</option>
-                            <option value="method">Methods Only</option>
-                            <option value="property">Properties Only</option>
+                        <h5 class="mt-3">Filter</h5>
+                        <select class="form-select form-select-sm mb-2" onchange="filterByType(this.value)">
+                            <option value="all">All</option>
+                            <option value="class">Classes</option>
+                            <option value="method">Methods</option>
+                            <option value="magic">Magic Methods</option>
+                            <option value="source">Sources</option>
+                            <option value="sink">Sinks</option>
+                            <option value="property">Properties</option>
                         </select>
                         
-                        <h5 class="mt-3">Statistics</h5>
+                        <h5 class="mt-3">Stats</h5>
                         <div id="graphStats" class="stats-panel">
-                            <p class="text-muted">Load a graph to see statistics</p>
+                            <p class="text-muted" style="font-size: 11px;">Load graph to see stats</p>
                         </div>
                         
                         <h5 class="mt-3">Legend</h5>
                         <div class="legend">
                             <div class="legend-item">
-                                <span class="legend-color" style="background-color: #00ff00;"></span>
-                                <span>Entry Point (unserialize)</span>
+                                <span class="legend-color" style="background-color: #1abc9c;"></span>
+                                <span>Entry Point</span>
                             </div>
+                            <div class="legend-item">
+                                <span class="legend-color" style="background-color: #3498db;"></span>
+                                <span>Class</span>
+                            </div>
+                            <div class="legend-item">
+                                <span class="legend-color" style="background-color: #27ae60;"></span>
+                                <span>Method</span>
+                            </div>
+                            <div class="legend-item">
+                                <span class="legend-color" style="background-color: #e74c3c;"></span>
+                                <span>Magic Method</span>
+                            </div>
+                            <div class="legend-item">
+                                <span class="legend-color" style="background-color: #f39c12;"></span>
+                                <span>Source (Input)</span>
+                            </div>
+                            <div class="legend-item">
+                                <span class="legend-color" style="background-color: #c0392b;"></span>
+                                <span>Sink (Danger)</span>
+                            </div>
+                            <div class="legend-item">
+                                <span class="legend-color" style="background-color: #9b59b6;"></span>
+                                <span>Property</span>
+                            </div>
+                        </div>
+                        
+                        <h5 class="mt-3">View</h5>
+                        <div class="btn-group-vertical w-100 mb-2" role="group">
+                            <button type="button" class="btn btn-sm btn-outline-secondary" onclick="showAll()">Show All</button>
+                            <button type="button" class="btn btn-sm btn-outline-info" onclick="showMagicChain()">Magic Chain</button>
+                            <button type="button" class="btn btn-sm btn-outline-danger" onclick="highlightPOPChain()">POP Path</button>
+                        </div>
+
+                        <h5 class="mt-3">Layout</h5>
+                        <select class="form-select form-select-sm mb-2" onchange="changeLayout(this.value)">
+                            <option value="cose">Force (CoSE)</option>
+                            <option value="dagre">Hierarchical</option>
+                            <option value="breadthfirst">Tree</option>
+                            <option value="circle">Circle</option>
+                            <option value="concentric">Concentric</option>
+                        </select>
+
+                        <h5 class="mt-3">Details</h5>
+                        <div id="nodeDetails" class="node-details">
+                            <p class="text-muted" style="font-size: 11px;">Click a node</p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Bootstrap JS -->
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+    
+    <!-- Graph API -->
+    <script src="api.js"></script>
+    
+    <!-- Graph Visualization -->
+    <script src="graph.js"></script>
+</body>
+</html>
                             <div class="legend-item">
                                 <span class="legend-color" style="background-color: #4a9eff;"></span>
                                 <span>Class</span>
@@ -126,62 +156,115 @@
                             </div>
                             <div class="legend-item">
                                 <span class="legend-color" style="background-color: #ff9f40;"></span>
-                                <span>Source</span>
+                                <span>Source (用户输入)</span>
                             </div>
                             <div class="legend-item">
                                 <span class="legend-color" style="background-color: #dc3545;"></span>
-                                <span>Sink</span>
+                                <span>Sink (危险函数)</span>
                             </div>
                             <div class="legend-item">
                                 <span class="legend-color" style="background-color: #9966ff;"></span>
-                                <span>Property</span>
+                                <span>Property (属性)</span>
+                            </div>
+                            <div class="legend-item">
+                                <span class="legend-color" style="background-color: #00BCD4;"></span>
+                                <span>Function (函数)</span>
+                            </div>
+                            <div class="legend-item">
+                                <span class="legend-color" style="background-color: #3F51B5;"></span>
+                                <span>Interface (接口)</span>
+                            </div>
+                            <div class="legend-item">
+                                <span class="legend-color" style="background-color: #795548;"></span>
+                                <span>Variable (变量)</span>
                             </div>
                             
                             <h6 class="mt-3">Edge Types</h6>
                             <div class="legend-item">
                                 <span class="edge-legend" style="border-top: 3px solid #ff6b6b;"></span>
-                                <span>extends</span>
+                                <span>extends (继承)</span>
                             </div>
                             <div class="legend-item">
                                 <span class="edge-legend" style="border-top: 2px dashed #6cbc6c;"></span>
-                                <span>implements</span>
+                                <span>implements (实现)</span>
                             </div>
                             <div class="legend-item">
                                 <span class="edge-legend" style="border-top: 2px solid #ff0000;"></span>
-                                <span>triggers</span>
+                                <span>triggers (触发)</span>
                             </div>
                             <div class="legend-item">
                                 <span class="edge-legend" style="border-top: 2px solid #4a9eff;"></span>
-                                <span>calls</span>
+                                <span>calls (调用)</span>
                             </div>
                             <div class="legend-item">
-                                <span class="edge-legend" style="border-top: 2px dotted #ff9f40;"></span>
-                                <span>dataflow</span>
+                                <span class="edge-legend" style="border-top: 2px solid #ff9f40;"></span>
+                                <span>dataflow (数据流)</span>
                             </div>
                             <div class="legend-item">
                                 <span class="edge-legend" style="border-top: 1px dashed #999999;"></span>
-                                <span>contains</span>
+                                <span>contains (包含)</span>
+                            </div>
+                            <div class="legend-item">
+                                <span class="edge-legend" style="border-top: 2px dashed #9C27B0;"></span>
+                                <span>has_property (拥有属性)</span>
+                            </div>
+                            <div class="legend-item">
+                                <span class="edge-legend" style="border-top: 2px dashed #4CAF50;"></span>
+                                <span>has_method (拥有方法)</span>
+                            </div>
+                            <div class="legend-item">
+                                <span class="edge-legend" style="border-top: 2px solid #f44336;"></span>
+                                <span>calls_dangerous (危险调用)</span>
+                            </div>
+                            <div class="legend-item">
+                                <span class="edge-legend" style="border-top: 2px solid #8BC34A;"></span>
+                                <span>assigns (赋值)</span>
+                            </div>
+                            <div class="legend-item">
+                                <span class="edge-legend" style="border-top: 2px dotted #00BCD4;"></span>
+                                <span>uses (使用)</span>
                             </div>
                         </div>
                         
                         <h5 class="mt-3">View Controls</h5>
                         <div class="btn-group-vertical w-100 mb-3" role="group">
                             <button type="button" class="btn btn-sm btn-outline-primary" onclick="showAll()">Show All</button>
-                            <button type="button" class="btn btn-sm btn-outline-primary" onclick="showInheritance()">Inheritance Only</button>
+                            <button type="button" class="btn btn-sm btn-outline-info" onclick="showClassesOnly()">Classes Only</button>
+                            <button type="button" class="btn btn-sm btn-outline-success" onclick="showMethodsOnly()">Methods Only</button>
+                            <button type="button" class="btn btn-sm btn-outline-secondary" onclick="showFunctionsOnly()">Functions Only</button>
+                            <button type="button" class="btn btn-sm btn-outline-warning" onclick="showDataFlow()">Data Flow Only</button>
                             <button type="button" class="btn btn-sm btn-outline-primary" onclick="showMagicChain()">Magic Method Chain</button>
-                            <button type="button" class="btn btn-sm btn-outline-primary" onclick="showDataFlow()">Data Flow Only</button>
+                            <button type="button" class="btn btn-sm btn-outline-info" onclick="showCallGraph()">Call Graph</button>
+                            <button type="button" class="btn btn-sm btn-outline-success" onclick="showVariablesAndFlow()">Variables & Flow</button>
                             <button type="button" class="btn btn-sm btn-danger" onclick="highlightPOPChain()">Highlight POP Chain</button>
                         </div>
                         
+                        <h5 class="mt-3">Layout</h5>
+                        <select class="form-select mb-2" onchange="changeLayout(this.value)">
+                            <option value="dagre">Hierarchical (Dagre)</option>
+                            <option value="cose">Force-directed (CoSE)</option>
+                            <option value="breadthfirst">Breadth First</option>
+                            <option value="circle">Circle</option>
+                            <option value="concentric">Concentric</option>
+                            <option value="grid">Grid</option>
+                        </select>
+
                         <h5 class="mt-3">Edge Filter</h5>
                         <select class="form-select mb-2" onchange="filterEdgeType(this.value)">
                             <option value="all">All Edges</option>
-                            <option value="extends">Extends Only</option>
-                            <option value="implements">Implements Only</option>
-                            <option value="triggers">Triggers Only</option>
-                            <option value="calls">Calls Only</option>
-                            <option value="dataflow">Data Flow Only</option>
-                            <option value="contains">Contains Only</option>
+                            <option value="extends">Extends (继承)</option>
+                            <option value="implements">Implements (实现)</option>
+                            <option value="triggers">Triggers (触发)</option>
+                            <option value="calls">Calls (调用)</option>
+                            <option value="dataflow">Dataflow (数据流)</option>
+                            <option value="contains">Contains (包含)</option>
+                            <option value="has_property">Has Property (拥有属性)</option>
+                            <option value="has_method">Has Method (拥有方法)</option>
+                            <option value="uses_property">Uses Property (使用属性)</option>
+                            <option value="calls_dangerous">Calls Dangerous (危险调用)</option>
+                            <option value="assigns">Assigns (赋值)</option>
+                            <option value="uses">Uses (使用)</option>
+                            <option value="returns">Returns (返回)</option>
                         </select>
 
                         <h5 class="mt-3">Node Details</h5>
@@ -207,6 +290,10 @@
         </div>
     </div>
 
+    <!-- Dagre Layout Plugin -->
+    <script src="https://cdn.jsdelivr.net/npm/dagre@0.8.5/dist/dagre.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/cytoscape-dagre@2.5.0/cytoscape-dagre.min.js"></script>
+    
     <!-- Bootstrap JS -->
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
     

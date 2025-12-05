@@ -38,10 +38,11 @@ export class PHPAnalyzer {
         if (Array.isArray(node)) {
             node.forEach(child => this.traverse(child, callback, parent));
         } else {
-            // Traverse known properties
+            // Traverse known properties - must include 'expression' for expressionstatement nodes
             const properties = ['children', 'body', 'arguments', 'items', 'what', 'left', 'right', 
-                              'expr', 'test', 'alternate', 'consequent', 'properties', 'methods',
-                              'extends', 'implements', 'adaptations', 'key', 'value'];
+                              'expr', 'expression', 'test', 'alternate', 'consequent', 'properties', 'methods',
+                              'extends', 'implements', 'adaptations', 'key', 'value', 'target', 'offset',
+                              'trueExpr', 'falseExpr', 'init', 'cond', 'loop', 'source', 'catches', 'always'];
             
             for (const prop of properties) {
                 if (node[prop]) {
@@ -90,6 +91,10 @@ export class PHPAnalyzer {
 
     getAllFunctionCalls(): any[] {
         return this.findNodesByType('call');
+    }
+
+    getAllAssignments(): any[] {
+        return this.findNodesByType('assign');
     }
 
     isMagicMethod(methodName: string): boolean {

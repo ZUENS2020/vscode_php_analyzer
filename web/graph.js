@@ -1,33 +1,39 @@
-// Graph visualization using Cytoscape.js
+// Graph visualization using Cytoscape.js - Maltego-inspired clean UI
 
 let cy = null;
 let currentGraphType = 'code';
 let currentFilePath = '';  // Store current PHP file path
 
-// Node type color mapping - darker colors for better contrast
+// Maltego-style node colors - high contrast, professional
 const NODE_COLORS = {
-    'class': '#2196F3',
-    'method': '#4CAF50',
-    'magic': '#f44336',
-    'source': '#FF9800',
-    'sink': '#E91E63',
-    'property': '#9C27B0',
-    'serialization': '#FFC107',
-    'entry': '#00E676',
-    'chain': '#FF5722'
+    'class': '#3498db',      // Blue
+    'method': '#27ae60',     // Green
+    'magic': '#e74c3c',      // Red
+    'source': '#f39c12',     // Orange
+    'sink': '#c0392b',       // Dark red
+    'property': '#9b59b6',   // Purple
+    'serialization': '#f1c40f', // Yellow
+    'entry': '#1abc9c',      // Teal
+    'chain': '#e67e22',      // Dark orange
+    'function': '#16a085',   // Dark teal
+    'interface': '#2980b9',  // Dark blue
+    'variable': '#8e44ad'    // Dark purple
 };
 
-// Node shape mapping
+// Maltego-style shapes - simple geometric
 const NODE_SHAPES = {
-    'class': 'rectangle',
+    'class': 'round-rectangle',
     'method': 'ellipse',
     'magic': 'diamond',
     'source': 'hexagon',
     'sink': 'octagon',
-    'property': 'triangle',
+    'property': 'round-rectangle',
     'serialization': 'round-rectangle',
     'entry': 'star',
-    'chain': 'diamond'
+    'chain': 'diamond',
+    'function': 'ellipse',
+    'interface': 'round-rectangle',
+    'variable': 'ellipse'
 };
 
 // Edge type color mapping - brighter for dark background
@@ -39,7 +45,15 @@ const EDGE_COLORS = {
     'dataflow': '#FF9800',
     'triggers': '#ff1744',
     'invokes': '#E91E63',
-    'property_flow': '#9C27B0'
+    'property_flow': '#9C27B0',
+    'has_property': '#9C27B0',
+    'has_method': '#4CAF50',
+    'uses_property': '#795548',
+    'calls_dangerous': '#f44336',
+    'assigns': '#8BC34A',
+    'uses': '#00BCD4',
+    'returns': '#FF5722',
+    'references': '#03A9F4'
 };
 
 // Edge style mapping
@@ -51,158 +65,231 @@ const EDGE_STYLES = {
     'dataflow': 'solid',
     'triggers': 'solid',
     'invokes': 'solid',
-    'property_flow': 'dashed'
+    'property_flow': 'dashed',
+    'has_property': 'dashed',
+    'has_method': 'dashed',
+    'uses_property': 'dotted',
+    'calls_dangerous': 'solid',
+    'assigns': 'solid',
+    'uses': 'dotted',
+    'returns': 'solid',
+    'references': 'dashed'
 };
 
-// Edge width mapping
+// Edge width mapping - thinner, cleaner lines
 const EDGE_WIDTHS = {
     'contains': 1,
-    'calls': 2,
-    'extends': 3,
-    'implements': 2,
-    'dataflow': 3,
-    'triggers': 4,
-    'invokes': 3,
-    'property_flow': 2
+    'calls': 1.5,
+    'extends': 2,
+    'implements': 1.5,
+    'dataflow': 2,
+    'triggers': 2.5,
+    'invokes': 2,
+    'property_flow': 1.5,
+    'has_property': 1,
+    'has_method': 1,
+    'uses_property': 1,
+    'calls_dangerous': 2,
+    'assigns': 1.5,
+    'uses': 1,
+    'returns': 1.5,
+    'references': 1
 };
 
-// Initialize Cytoscape
+// Initialize Cytoscape with Maltego-inspired styling
 function initializeCytoscape() {
-    // Helper function to get node size based on type
+    // Maltego-style node sizing - compact but readable
     function getNodeSize(type) {
         const sizes = {
-            'entry': 70,
-            'class': 65,
-            'magic': 55,
-            'sink': 60,
-            'source': 55,
-            'property': 35,
-            'chain': 55
+            'entry': 50,
+            'class': 45,
+            'magic': 40,
+            'sink': 45,
+            'source': 40,
+            'property': 30,
+            'chain': 40,
+            'method': 35,
+            'function': 35,
+            'interface': 40,
+            'variable': 30
         };
-        return sizes[type] || 40;
+        return sizes[type] || 35;
     }
 
     cy = cytoscape({
         container: document.getElementById('cy'),
         
+        // Enable high quality rendering
+        textureOnViewport: false,
+        hideEdgesOnViewport: false,
+        hideLabelsOnViewport: false,
+        
+        // Maltego-inspired clean style
         style: [
             {
                 selector: 'node',
                 style: {
                     'background-color': function(ele) {
-                        return NODE_COLORS[ele.data('type')] || '#607D8B';
+                        return NODE_COLORS[ele.data('type')] || '#7f8c8d';
                     },
+                    'background-opacity': 0.95,
                     'shape': function(ele) {
                         return NODE_SHAPES[ele.data('type')] || 'ellipse';
                     },
-                    'label': 'data(label)',
+                    'label': function(ele) {
+                        // Truncate long labels for cleaner display
+                        const label = ele.data('label') || '';
+                        return label.length > 20 ? label.substring(0, 18) + '...' : label;
+                    },
                     'color': '#ffffff',
-                    'text-valign': 'center',
+                    'text-valign': 'bottom',
                     'text-halign': 'center',
-                    'font-size': '11px',
-                    'font-weight': 'bold',
+                    'text-margin-y': 5,
+                    'font-size': '12px',
+                    'font-family': 'Consolas, Monaco, monospace',
+                    'font-weight': '600',
                     'width': function(ele) {
                         return getNodeSize(ele.data('type'));
                     },
                     'height': function(ele) {
                         return getNodeSize(ele.data('type'));
                     },
-                    'border-width': 3,
+                    'border-width': 2,
                     'border-color': '#ffffff',
-                    'text-outline-color': '#000000',
-                    'text-outline-width': 2
+                    'border-opacity': 0.8,
+                    'text-outline-color': '#1a1a2e',
+                    'text-outline-width': 2,
+                    'text-outline-opacity': 1,
+                    'min-zoomed-font-size': 10
                 }
             },
             {
                 selector: 'node:selected',
                 style: {
-                    'border-width': 5,
-                    'border-color': '#ffeb3b',
-                    'background-color': '#ff5722'
+                    'border-width': 4,
+                    'border-color': '#f1c40f',
+                    'border-opacity': 1,
+                    'background-opacity': 1,
+                    'overlay-color': '#f1c40f',
+                    'overlay-padding': 6,
+                    'overlay-opacity': 0.3
+                }
+            },
+            {
+                selector: 'node:active',
+                style: {
+                    'overlay-color': '#3498db',
+                    'overlay-padding': 8,
+                    'overlay-opacity': 0.25
                 }
             },
             {
                 selector: 'edge',
                 style: {
                     'width': function(ele) {
-                        return EDGE_WIDTHS[ele.data('type')] || 2;
+                        return EDGE_WIDTHS[ele.data('type')] || 1.5;
                     },
                     'line-color': function(ele) {
-                        return EDGE_COLORS[ele.data('type')] || '#607D8B';
+                        return EDGE_COLORS[ele.data('type')] || '#95a5a6';
                     },
                     'line-style': function(ele) {
                         return EDGE_STYLES[ele.data('type')] || 'solid';
                     },
                     'target-arrow-color': function(ele) {
-                        return EDGE_COLORS[ele.data('type')] || '#607D8B';
+                        return EDGE_COLORS[ele.data('type')] || '#95a5a6';
                     },
                     'target-arrow-shape': 'triangle',
-                    'arrow-scale': 1.5,
+                    'arrow-scale': 1.2,
                     'curve-style': 'bezier',
-                    'label': 'data(label)',
-                    'font-size': '10px',
-                    'color': '#ffffff',
+                    'opacity': 0.85,
+                    // Hide edge labels by default for cleaner look
+                    'label': '',
+                    'font-size': '9px',
+                    'color': '#bdc3c7',
                     'text-rotation': 'autorotate',
                     'text-background-color': '#1a1a2e',
                     'text-background-opacity': 0.9,
-                    'text-background-padding': '3px',
-                    'text-outline-color': '#000000',
-                    'text-outline-width': 1
+                    'text-background-padding': '2px'
                 }
             },
             {
                 selector: 'edge:selected',
                 style: {
-                    'width': 5,
-                    'line-color': '#ffeb3b',
-                    'target-arrow-color': '#ffeb3b'
+                    'width': 3,
+                    'line-color': '#f1c40f',
+                    'target-arrow-color': '#f1c40f',
+                    'opacity': 1,
+                    'label': 'data(label)',
+                    'z-index': 999
                 }
             },
             {
                 selector: '.highlighted',
                 style: {
-                    'background-color': '#ff1744',
-                    'line-color': '#ff1744',
-                    'target-arrow-color': '#ff1744',
-                    'border-width': 5,
-                    'border-color': '#ffeb3b'
+                    'background-color': '#e74c3c',
+                    'line-color': '#e74c3c',
+                    'target-arrow-color': '#e74c3c',
+                    'border-width': 4,
+                    'border-color': '#f1c40f',
+                    'opacity': 1,
+                    'z-index': 999
                 }
             },
             {
                 selector: '.filtered',
                 style: {
-                    'opacity': 0.15
+                    'opacity': 0.1
                 }
             },
             {
                 selector: '.attack-path',
                 style: {
-                    'line-color': '#ff1744',
-                    'target-arrow-color': '#ff1744',
-                    'width': 5,
+                    'line-color': '#e74c3c',
+                    'target-arrow-color': '#e74c3c',
+                    'width': 3,
+                    'opacity': 1,
+                    'z-index': 999
+                }
+            },
+            {
+                selector: '.dimmed',
+                style: {
+                    'opacity': 0.2
+                }
+            },
+            {
+                selector: '.focused',
+                style: {
+                    'opacity': 1,
                     'z-index': 999
                 }
             }
         ],
         
+        // Better layout for readability
         layout: {
             name: 'cose',
-            idealEdgeLength: 120,
-            nodeOverlap: 20,
+            idealEdgeLength: 100,
+            nodeOverlap: 30,
             refresh: 20,
             fit: true,
-            padding: 40,
+            padding: 50,
             randomize: false,
-            componentSpacing: 120,
-            nodeRepulsion: 400000,
+            componentSpacing: 150,
+            nodeRepulsion: 500000,
             edgeElasticity: 100,
             nestingFactor: 5,
-            gravity: 80,
-            numIter: 1000,
-            initialTemp: 200,
+            gravity: 50,
+            numIter: 1500,
+            initialTemp: 250,
             coolingFactor: 0.95,
             minTemp: 1.0
-        }
+        },
+        
+        // Better interaction
+        minZoom: 0.2,
+        maxZoom: 3,
+        wheelSensitivity: 0.3
     });
 
     // Event handlers
@@ -1576,6 +1663,148 @@ function showAll() {
 }
 
 /**
+ * Show only class nodes
+ */
+function showClassesOnly() {
+    if (!cy) { return; }
+    
+    cy.elements().addClass('filtered');
+    
+    // Show class and interface nodes
+    cy.nodes().filter(n => 
+        n.data('type') === 'class' || 
+        n.data('type') === 'interface'
+    ).removeClass('filtered');
+    
+    // Show extends and implements edges
+    const classEdges = cy.edges().filter(e => 
+        e.data('type') === 'extends' || 
+        e.data('type') === 'implements'
+    );
+    classEdges.removeClass('filtered');
+    
+    showNotification('Showing classes and interfaces only', 'info');
+}
+
+/**
+ * Show only methods
+ */
+function showMethodsOnly() {
+    if (!cy) { return; }
+    
+    cy.elements().addClass('filtered');
+    
+    // Show method and magic method nodes
+    cy.nodes().filter(n => 
+        n.data('type') === 'method' || 
+        n.data('type') === 'magic' ||
+        n.data('type') === 'function'
+    ).removeClass('filtered');
+    
+    // Show call edges
+    const callEdges = cy.edges().filter(e => 
+        e.data('type') === 'calls' || 
+        e.data('type') === 'triggers'
+    );
+    callEdges.removeClass('filtered');
+    callEdges.connectedNodes().removeClass('filtered');
+    
+    showNotification('Showing methods only', 'info');
+}
+
+/**
+ * Show only data flow (sources -> variables -> sinks)
+ */
+function showDataFlow() {
+    if (!cy) { return; }
+    
+    cy.elements().addClass('filtered');
+    
+    // Show sources, sinks, variables, and properties
+    cy.nodes().filter(n => 
+        n.data('type') === 'source' || 
+        n.data('type') === 'sink' || 
+        n.data('type') === 'variable' ||
+        n.data('type') === 'property'
+    ).removeClass('filtered');
+    
+    // Show dataflow edges
+    const flowEdges = cy.edges().filter(e => 
+        e.data('type') === 'dataflow' || 
+        e.data('type') === 'calls_dangerous'
+    );
+    flowEdges.removeClass('filtered');
+    flowEdges.connectedNodes().removeClass('filtered');
+    
+    showNotification('Showing data flow paths', 'info');
+}
+
+/**
+ * Change graph layout
+ */
+function changeLayout(layoutName) {
+    if (!cy) { return; }
+    
+    let layoutOptions = {
+        name: layoutName,
+        fit: true,
+        padding: 50,
+        animate: true,
+        animationDuration: 500
+    };
+    
+    // Add specific options for each layout
+    switch (layoutName) {
+        case 'dagre':
+            layoutOptions = {
+                ...layoutOptions,
+                rankDir: 'TB',
+                nodeSep: 80,
+                rankSep: 100,
+                edgeSep: 50
+            };
+            break;
+        case 'cose':
+            layoutOptions = {
+                ...layoutOptions,
+                idealEdgeLength: 100,
+                nodeOverlap: 20,
+                nodeRepulsion: 400000,
+                gravity: 80
+            };
+            break;
+        case 'breadthfirst':
+            layoutOptions = {
+                ...layoutOptions,
+                directed: true,
+                spacingFactor: 1.5
+            };
+            break;
+        case 'concentric':
+            layoutOptions = {
+                ...layoutOptions,
+                minNodeSpacing: 50,
+                concentric: function(node) {
+                    // Entry nodes at center, sinks at outer ring
+                    const type = node.data('type');
+                    if (type === 'entry') return 10;
+                    if (type === 'source') return 8;
+                    if (type === 'class') return 6;
+                    if (type === 'method' || type === 'magic') return 4;
+                    if (type === 'property' || type === 'variable') return 2;
+                    if (type === 'sink') return 0;
+                    return 5;
+                },
+                levelWidth: function() { return 2; }
+            };
+            break;
+    }
+    
+    cy.layout(layoutOptions).run();
+    showNotification(`Layout changed to ${layoutName}`, 'info');
+}
+
+/**
  * Show only inheritance relationships
  */
 function showInheritance() {
@@ -1620,26 +1849,79 @@ function showMagicChain() {
 }
 
 /**
- * Show only data flow
+ * Show only functions (global functions and methods)
  */
-function showDataFlow() {
+function showFunctionsOnly() {
     if (!cy) { return; }
     
     cy.elements().addClass('filtered');
     
-    // Show sources, sinks, and properties
+    // Show function and method nodes
     cy.nodes().filter(n => 
-        n.data('type') === 'source' || 
-        n.data('type') === 'sink' || 
+        n.data('type') === 'function' ||
+        n.data('type') === 'method' ||
+        n.data('type') === 'magic'
+    ).removeClass('filtered');
+    
+    // Show call edges
+    const callEdges = cy.edges().filter(e => 
+        e.data('type') === 'calls' ||
+        e.data('type') === 'has_method'
+    );
+    callEdges.removeClass('filtered');
+    callEdges.connectedNodes().removeClass('filtered');
+    
+    showNotification('Showing functions and methods', 'info');
+}
+
+/**
+ * Show call graph - all call relationships
+ */
+function showCallGraph() {
+    if (!cy) { return; }
+    
+    cy.elements().addClass('filtered');
+    
+    // Show all call edges
+    const callEdges = cy.edges().filter(e => 
+        e.data('type') === 'calls' ||
+        e.data('type') === 'triggers' ||
+        e.data('type') === 'calls_dangerous'
+    );
+    
+    callEdges.removeClass('filtered');
+    callEdges.connectedNodes().removeClass('filtered');
+    
+    showNotification(`Showing call graph with ${callEdges.length} call(s)`, 'info');
+}
+
+/**
+ * Show variables and data flow
+ */
+function showVariablesAndFlow() {
+    if (!cy) { return; }
+    
+    cy.elements().addClass('filtered');
+    
+    // Show variable, source, sink nodes
+    cy.nodes().filter(n => 
+        n.data('type') === 'variable' ||
+        n.data('type') === 'source' ||
+        n.data('type') === 'sink' ||
         n.data('type') === 'property'
     ).removeClass('filtered');
     
-    // Show dataflow edges
-    const dataflowEdges = cy.edges().filter(e => e.data('type') === 'dataflow');
-    dataflowEdges.removeClass('filtered');
-    dataflowEdges.connectedNodes().removeClass('filtered');
+    // Show data flow edges
+    const flowEdges = cy.edges().filter(e => 
+        e.data('type') === 'dataflow' ||
+        e.data('type') === 'assigns' ||
+        e.data('type') === 'uses' ||
+        e.data('type') === 'calls_dangerous'
+    );
+    flowEdges.removeClass('filtered');
+    flowEdges.connectedNodes().removeClass('filtered');
     
-    showNotification('Showing data flow paths', 'info');
+    showNotification('Showing variables and data flow', 'info');
 }
 
 /**

@@ -1,108 +1,153 @@
+/* Maltego-inspired dark theme */
 body {
     margin: 0;
     padding: 0;
-    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+    font-family: 'Segoe UI', -apple-system, BlinkMacSystemFont, Roboto, 'Helvetica Neue', Arial, sans-serif;
     overflow: hidden;
-    background-color: #1a1a2e;
-    color: #eaeaea;
+    background-color: #1e1e2e;
+    color: #cdd6f4;
 }
 
 #graph-container {
     position: relative;
     height: calc(100vh - 56px);
-    background-color: #16213e;
+    background-color: #181825;
 }
 
 #cy {
     width: 100%;
     height: 100%;
-    background-color: #0f0f23;
+    background: radial-gradient(ellipse at center, #1e1e2e 0%, #11111b 100%);
 }
 
 .graph-controls {
     position: absolute;
-    top: 20px;
-    right: 20px;
+    top: 15px;
+    right: 15px;
     z-index: 1000;
 }
 
 .sidebar {
     height: calc(100vh - 56px);
-    background-color: #1a1a2e;
-    border-left: 1px solid #3a3a5c;
+    background-color: #1e1e2e;
+    border-left: 1px solid #313244;
     overflow-y: auto;
-    color: #eaeaea;
+    color: #cdd6f4;
+    font-size: 13px;
+}
+
+.sidebar h5 {
+    font-size: 13px;
+    font-weight: 600;
+    color: #89b4fa;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    margin-bottom: 10px;
 }
 
 .legend {
-    background-color: #16213e;
+    background-color: #181825;
     padding: 10px;
-    border-radius: 4px;
-    border: 1px solid #3a3a5c;
+    border-radius: 6px;
+    border: 1px solid #313244;
 }
 
 .legend-item {
     display: flex;
     align-items: center;
-    margin-bottom: 8px;
-    color: #eaeaea;
+    margin-bottom: 6px;
+    color: #bac2de;
+    font-size: 12px;
 }
 
 .legend-color {
-    width: 20px;
-    height: 20px;
-    border-radius: 50%;
-    margin-right: 10px;
-    border: 1px solid #3a3a5c;
+    width: 16px;
+    height: 16px;
+    border-radius: 4px;
+    margin-right: 8px;
+    border: 1px solid rgba(255,255,255,0.2);
 }
 
 .edge-legend {
-    width: 30px;
+    width: 24px;
     height: 0;
-    margin-right: 10px;
+    margin-right: 8px;
     display: inline-block;
 }
 
 .node-details {
-    background-color: #16213e;
-    padding: 10px;
-    border-radius: 4px;
-    border: 1px solid #3a3a5c;
-    min-height: 100px;
-    max-height: 300px;
+    background-color: #181825;
+    padding: 12px;
+    border-radius: 6px;
+    border: 1px solid #313244;
+    min-height: 80px;
+    max-height: 280px;
     overflow-y: auto;
-    color: #eaeaea;
+    color: #cdd6f4;
 }
 
 .node-details h6 {
-    margin-top: 10px;
-    margin-bottom: 5px;
-    color: #4fc3f7;
+    margin-top: 8px;
+    margin-bottom: 4px;
+    color: #89b4fa;
+    font-size: 12px;
+    font-weight: 600;
 }
 
 .node-details p {
-    margin-bottom: 5px;
-    font-size: 14px;
-    color: #b0b0b0;
+    margin-bottom: 4px;
+    font-size: 12px;
+    color: #a6adc8;
 }
 
 .node-details .badge {
-    font-size: 12px;
-    margin-right: 5px;
+    font-size: 10px;
+    margin-right: 4px;
+    padding: 3px 6px;
 }
 
 .node-details pre {
-    background-color: #0f0f23;
-    color: #4fc3f7;
+    background-color: #11111b;
+    color: #94e2d5;
     padding: 8px;
     border-radius: 4px;
     font-size: 11px;
+    font-family: 'Consolas', 'Monaco', monospace;
+    border: 1px solid #313244;
 }
 
-/* Graph type buttons */
+/* Graph type buttons - Maltego style */
+.btn-group-vertical .btn {
+    font-size: 12px;
+    padding: 6px 12px;
+    border-color: #313244;
+    background-color: #1e1e2e;
+    color: #cdd6f4;
+}
+
+.btn-group-vertical .btn:hover {
+    background-color: #313244;
+    border-color: #45475a;
+}
+
 .btn-group-vertical .btn.active {
-    background-color: #0d6efd;
-    color: white;
+    background-color: #89b4fa;
+    border-color: #89b4fa;
+    color: #1e1e2e;
+}
+
+.form-select, .form-control {
+    font-size: 12px;
+    background-color: #181825;
+    border-color: #313244;
+    color: #cdd6f4;
+}
+
+.form-select:focus, .form-control:focus {
+    background-color: #181825;
+    border-color: #89b4fa;
+    color: #cdd6f4;
+    box-shadow: 0 0 0 2px rgba(137, 180, 250, 0.25);
 }
 
 /* Loading state */
@@ -112,7 +157,7 @@ body {
     left: 0;
     right: 0;
     bottom: 0;
-    background-color: rgba(255, 255, 255, 0.8);
+    background-color: rgba(17, 17, 27, 0.9);
     display: flex;
     align-items: center;
     justify-content: center;
@@ -120,40 +165,83 @@ body {
 }
 
 .loading-spinner {
-    width: 3rem;
-    height: 3rem;
+    width: 2.5rem;
+    height: 2.5rem;
+    color: #89b4fa;
+}
+
+/* Stats panel */
+.stats-panel {
+    background-color: #181825;
+    padding: 10px;
+    border-radius: 6px;
+    border: 1px solid #313244;
+    font-size: 12px;
+}
+
+.stats-panel p {
+    margin-bottom: 4px;
+    color: #a6adc8;
 }
 
 /* Responsive adjustments */
 @media (max-width: 768px) {
     .sidebar {
         height: auto;
-        max-height: 300px;
+        max-height: 280px;
     }
     
     #graph-container {
-        height: calc(100vh - 356px);
+        height: calc(100vh - 336px);
     }
 }
 
-/* Scrollbar styling */
+/* Custom scrollbar - dark theme */
 .sidebar::-webkit-scrollbar,
 .node-details::-webkit-scrollbar {
-    width: 8px;
+    width: 6px;
 }
 
 .sidebar::-webkit-scrollbar-track,
 .node-details::-webkit-scrollbar-track {
-    background: #f1f1f1;
+    background: #181825;
 }
 
 .sidebar::-webkit-scrollbar-thumb,
 .node-details::-webkit-scrollbar-thumb {
-    background: #888;
-    border-radius: 4px;
+    background: #45475a;
+    border-radius: 3px;
 }
 
 .sidebar::-webkit-scrollbar-thumb:hover,
 .node-details::-webkit-scrollbar-thumb:hover {
-    background: #555;
+    background: #585b70;
+}
+
+/* Zoom controls */
+.zoom-controls {
+    position: absolute;
+    bottom: 20px;
+    right: 20px;
+    display: flex;
+    flex-direction: column;
+    gap: 5px;
+    z-index: 1000;
+}
+
+.zoom-controls .btn {
+    width: 36px;
+    height: 36px;
+    padding: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background-color: #1e1e2e;
+    border-color: #313244;
+    color: #cdd6f4;
+    font-size: 16px;
+}
+
+.zoom-controls .btn:hover {
+    background-color: #313244;
 }

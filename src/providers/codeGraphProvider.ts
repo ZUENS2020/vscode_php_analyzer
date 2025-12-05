@@ -69,15 +69,400 @@ export class CodeGraphProvider implements vscode.WebviewViewProvider {
         }
     }
 
+    /**
+     * 构建增强版代码结构图
+     * 全面展示：类、方法、属性、变量、函数调用、数据流
+     */
     public buildCodeGraph(ast: any, document: vscode.TextDocument): CodeGraph {
         const nodes: GraphNode[] = [];
         const edges: GraphEdge[] = [];
         const nodeIds = new Set<string>();
+        const variableMap = new Map<string, { source: string; line: number }>();
 
         const phpAnalyzer = new PHPAnalyzer('');
         phpAnalyzer['ast'] = ast;
 
-        // 1. Add unserialize entry points
+        // ========== 1. 收集所有全局变量和超全局变量使用 ==========
+        const superGlobals = new Map<string, { key: string; line: number }[]>();
+        this.collectSuperGlobals(ast, superGlobals, phpAnalyzer);
+
+        // 添加超全局变量节点
+        superGlobals.forEach((usages, varName) => {
+            const nodeId = `superglobal_${varName}`;
+            if (!nodeIds.has(nodeId)) {
+                nodeIds.add(nodeId);
+                nodes.push({
+                    id: nodeId,
+                    label: `$${varName}`,
+                    type: 'source',
+                    metadata: {
+                        isSuperglobal: true,
+                        usageCount: usages.length,
+                        keys: usages.map(u => u.key).filter((v, i, a) => a.indexOf(v) === i)
+                    }
+                });
+            }
+        });
+
+        // ========== 2. 收集所有函数定义 ==========
+        const functions = phpAnalyzer.findNodesByType('function');
+        functions.forEach((func: any) => {
+            const funcName = func.name?.name || func.name || 'anonymous';
+            const funcId = `function_${funcName}`;
+            
+            if (!nodeIds.has(funcId)) {
+                nodeIds.add(funcId);
+                const params = (func.arguments || []).map((arg: any) => {
+                    const name = arg.name?.name || arg.name || 'unknown';
+                    const type = arg.type?.name || '';
+                    return type ? `${type} $${name}` : `$${name}`;
+                });
+                
+                nodes.push({
+                    id: funcId,
+                    label: `${funcName}()`,
+                    type: 'function',
+                    metadata: {
+                        line: phpAnalyzer.getNodeLocation(func)?.line,
+                        parameters: params,
+                        returnType: func.type?.name || 'mixed'
+                    }
+                });
+            }
+        });
+
+        // ========== 3. 收集所有类定义 ==========
+        const classes = phpAnalyzer.getAllClasses();
+        const classMap = new Map<string, any>();
+        
+        for (const classNode of classes) {
+            const className = classNode.name?.name || 'Unknown';
+            classMap.set(className, classNode);
+            
+            const classId = `class_${className}`;
+            if (!nodeIds.has(classId)) {
+                nodeIds.add(classId);
+                
+                // 统计类信息
+                let propertyCount = 0;
+                let methodCount = 0;
+                const magicMethods: string[] = [];
+                
+                if (classNode.body) {
+                    for (const member of classNode.body) {
+                        if (member.kind === 'propertystatement') {
+                            propertyCount += (member.properties?.length || 1);
+                        } else if (member.kind === 'method') {
+                            methodCount++;
+                            const methodName = member.name?.name || member.name || '';
+                            if (methodName.startsWith('__')) {
+                                magicMethods.push(methodName);
+                            }
+                        }
+                    }
+                }
+                
+                nodes.push({
+                    id: classId,
+                    label: className,
+                    type: 'class',
+                    metadata: {
+                        line: phpAnalyzer.getNodeLocation(classNode)?.line,
+                        extends: classNode.extends?.name || null,
+                        implements: classNode.implements?.map((i: any) => i.name) || [],
+                        propertyCount,
+                        methodCount,
+                        magicMethods,
+                        hasMagicMethods: magicMethods.length > 0
+                    }
+                });
+            }
+
+            // 添加继承关系
+            if (classNode.extends) {
+                const parentName = classNode.extends.name || 'Unknown';
+                const parentId = `class_${parentName}`;
+                
+                if (!nodeIds.has(parentId)) {
+                    nodeIds.add(parentId);
+                    nodes.push({
+                        id: parentId,
+                        label: parentName,
+                        type: 'class',
+                        metadata: { isExternal: true }
+                    });
+                }
+
+                edges.push({
+                    source: classId,
+                    target: parentId,
+                    type: 'extends',
+                    label: 'extends'
+                });
+            }
+
+            // 添加接口实现关系
+            if (classNode.implements) {
+                for (const iface of classNode.implements) {
+                    const ifaceName = iface.name || 'Unknown';
+                    const ifaceId = `interface_${ifaceName}`;
+                    
+                    if (!nodeIds.has(ifaceId)) {
+                        nodeIds.add(ifaceId);
+                        nodes.push({
+                            id: ifaceId,
+                            label: ifaceName,
+                            type: 'interface',
+                            metadata: { isInterface: true }
+                        });
+                    }
+
+                    edges.push({
+                        source: classId,
+                        target: ifaceId,
+                        type: 'implements',
+                        label: 'implements'
+                    });
+                }
+            }
+
+            // ========== 4. 添加类成员（属性和方法） ==========
+            if (classNode.body) {
+                for (const member of classNode.body) {
+                    if (member.kind === 'propertystatement') {
+                        // 添加属性节点
+                        const properties = member.properties || [];
+                        for (const prop of properties) {
+                            const propName = prop.name?.name || prop.name || 'unknown';
+                            const propId = `prop_${className}_${propName}`;
+                            const visibility = member.visibility || 'public';
+                            
+                            if (!nodeIds.has(propId)) {
+                                nodeIds.add(propId);
+                                nodes.push({
+                                    id: propId,
+                                    label: `$${propName}`,
+                                    type: 'property',
+                                    metadata: {
+                                        className,
+                                        visibility,
+                                        line: phpAnalyzer.getNodeLocation(prop)?.line,
+                                        hasDefault: prop.value !== null
+                                    }
+                                });
+                            }
+
+                            edges.push({
+                                source: classId,
+                                target: propId,
+                                type: 'has_property',
+                                label: visibility
+                            });
+                        }
+                    } else if (member.kind === 'method') {
+                        // 添加方法节点
+                        const methodName = member.name?.name || member.name || 'unknown';
+                        const methodId = `method_${className}_${methodName}`;
+                        const isMagic = methodName.startsWith('__');
+                        const visibility = member.visibility || 'public';
+                        
+                        const params = (member.arguments || []).map((arg: any) => {
+                            const name = arg.name?.name || arg.name || 'unknown';
+                            const type = arg.type?.name || '';
+                            return type ? `${type} $${name}` : `$${name}`;
+                        });
+                        
+                        // 分析方法体中的危险调用
+                        const dangerousCalls: string[] = [];
+                        const calledMethods: string[] = [];
+                        const usedProperties: string[] = [];
+                        
+                        if (member.body?.children) {
+                            this.analyzeMethodBodyEnhanced(
+                                member.body.children, 
+                                dangerousCalls, 
+                                calledMethods, 
+                                usedProperties,
+                                phpAnalyzer
+                            );
+                        }
+                        
+                        if (!nodeIds.has(methodId)) {
+                            nodeIds.add(methodId);
+                            nodes.push({
+                                id: methodId,
+                                label: `${methodName}()`,
+                                type: isMagic ? 'magic' : 'method',
+                                metadata: {
+                                    className,
+                                    line: phpAnalyzer.getNodeLocation(member)?.line,
+                                    isMagic,
+                                    visibility,
+                                    parameters: params,
+                                    returnType: member.type?.name || 'mixed',
+                                    dangerousCalls,
+                                    description: isMagic ? this.getMagicMethodDescription(methodName) : ''
+                                }
+                            });
+                        }
+
+                        edges.push({
+                            source: classId,
+                            target: methodId,
+                            type: 'has_method',
+                            label: visibility
+                        });
+
+                        // 添加方法使用属性的边
+                        for (const propName of usedProperties) {
+                            const propId = `prop_${className}_${propName}`;
+                            if (nodeIds.has(propId)) {
+                                edges.push({
+                                    source: methodId,
+                                    target: propId,
+                                    type: 'uses_property',
+                                    label: 'uses'
+                                });
+                            }
+                        }
+
+                        // 添加方法调用关系 - 只有目标节点存在时才添加边
+                        for (const calledMethod of calledMethods) {
+                            // 检查是否是同类的方法
+                            const sameClassMethodId = `method_${className}_${calledMethod}`;
+                            // 只在目标节点确实存在时添加边
+                            if (nodeIds.has(sameClassMethodId)) {
+                                edges.push({
+                                    source: methodId,
+                                    target: sameClassMethodId,
+                                    type: 'calls',
+                                    label: 'calls'
+                                });
+                            }
+                        }
+
+                        // 添加危险函数调用节点
+                        for (const dangerCall of dangerousCalls) {
+                            const sinkId = `sink_${dangerCall}_${methodId}`;
+                            if (!nodeIds.has(sinkId)) {
+                                nodeIds.add(sinkId);
+                                nodes.push({
+                                    id: sinkId,
+                                    label: `⚠️ ${dangerCall}()`,
+                                    type: 'sink',
+                                    metadata: {
+                                        dangerous: true,
+                                        calledFrom: `${className}::${methodName}`
+                                    }
+                                });
+                            }
+
+                            edges.push({
+                                source: methodId,
+                                target: sinkId,
+                                type: 'calls_dangerous',
+                                label: 'calls'
+                            });
+                        }
+                    }
+                }
+            }
+        }
+
+        // ========== 5. 收集所有函数调用并建立关系 ==========
+        const functionCalls = phpAnalyzer.getAllFunctionCalls();
+        const dangerousFunctions = [
+            'eval', 'assert', 'system', 'exec', 'passthru', 'shell_exec',
+            'popen', 'proc_open', 'pcntl_exec', 'call_user_func', 'call_user_func_array',
+            'unserialize', 'file_get_contents', 'file_put_contents', 'fopen', 'fwrite',
+            'include', 'include_once', 'require', 'require_once',
+            'preg_replace', 'extract', 'parse_str'
+        ];
+
+        for (const call of functionCalls) {
+            const funcName = this.getFunctionNameFromCall(call);
+            if (!funcName) continue;
+
+            // 检查是否调用危险函数
+            if (dangerousFunctions.includes(funcName.toLowerCase())) {
+                const callLine = phpAnalyzer.getNodeLocation(call)?.line || 0;
+                const sinkId = `sink_global_${funcName}_${callLine}`;
+                
+                if (!nodeIds.has(sinkId)) {
+                    nodeIds.add(sinkId);
+                    nodes.push({
+                        id: sinkId,
+                        label: `⚠️ ${funcName}()`,
+                        type: 'sink',
+                        metadata: {
+                            dangerous: true,
+                            line: callLine,
+                            description: this.getDangerousFunctionDescription(funcName)
+                        }
+                    });
+                }
+
+                // 检查参数是否来自用户输入
+                if (call.arguments && call.arguments.length > 0) {
+                    const firstArg = call.arguments[0];
+                    const source = this.traceArgumentSource(firstArg, superGlobals);
+                    if (source) {
+                        const sourceId = `superglobal_${source}`;
+                        if (nodeIds.has(sourceId)) {
+                            edges.push({
+                                source: sourceId,
+                                target: sinkId,
+                                type: 'dataflow',
+                                label: 'flows to'
+                            });
+                        }
+                    }
+                }
+            }
+        }
+
+        // ========== 6. 添加变量赋值和数据流 ==========
+        const assignments = phpAnalyzer.getAllAssignments();
+        for (const assign of assignments) {
+            const leftName = this.getVariableName(assign.left);
+            if (!leftName) continue;
+
+            const source = this.getSourceFromAssignment(assign.right, superGlobals);
+            if (source) {
+                variableMap.set(leftName, {
+                    source,
+                    line: phpAnalyzer.getNodeLocation(assign)?.line || 0
+                });
+
+                // 创建变量节点
+                const varId = `var_${leftName}_${variableMap.get(leftName)?.line}`;
+                if (!nodeIds.has(varId)) {
+                    nodeIds.add(varId);
+                    nodes.push({
+                        id: varId,
+                        label: `$${leftName}`,
+                        type: 'variable',
+                        metadata: {
+                            taintedFrom: source,
+                            line: variableMap.get(leftName)?.line
+                        }
+                    });
+                }
+
+                // 连接到源
+                const sourceId = `superglobal_${source}`;
+                if (nodeIds.has(sourceId)) {
+                    edges.push({
+                        source: sourceId,
+                        target: varId,
+                        type: 'dataflow',
+                        label: 'assigns to'
+                    });
+                }
+            }
+        }
+
+        // ========== 7. 添加 unserialize 入口点 ==========
         const magicAnalyzer = new MagicMethodChainAnalyzer(ast, document);
         const unserializeEntries = magicAnalyzer.findUnserializeEntries();
         
@@ -85,7 +470,6 @@ export class CodeGraphProvider implements vscode.WebviewViewProvider {
             const entryId = `entry_unserialize_${index}`;
             nodeIds.add(entryId);
             
-            // 构造更详细的标签
             let label = 'unserialize(';
             if (entry.paramSource && entry.paramName) {
                 label += `${entry.paramSource}['${entry.paramName}']`;
@@ -108,320 +492,200 @@ export class CodeGraphProvider implements vscode.WebviewViewProvider {
                     paramSource: entry.paramSource
                 }
             });
-        });
 
-        // 2. Add all class nodes with inheritance relationships and properties
-        const classes = phpAnalyzer.getAllClasses();
-        const classMap = new Map<string, any>();
-        
-        for (const classNode of classes) {
-            const className = classNode.name?.name || 'Unknown';
-            classMap.set(className, classNode);
-            
-            const classId = `class_${className}`;
-            if (!nodeIds.has(classId)) {
-                nodeIds.add(classId);
-                
-                // 统计类的属性和方法数量
-                let propertyCount = 0;
-                let methodCount = 0;
-                let hasMagicMethods = false;
-                const magicMethodsList: string[] = [];
-                
+            // 连接到 __wakeup 和 __destruct 方法
+            for (const classNode of classes) {
+                const className = classNode.name?.name || 'Unknown';
                 if (classNode.body) {
                     for (const member of classNode.body) {
-                        if (member.kind === 'propertystatement') {
-                            propertyCount += (member.properties?.length || 1);
-                        } else if (member.kind === 'method') {
-                            methodCount++;
+                        if (member.kind === 'method') {
                             const methodName = member.name?.name || member.name || '';
-                            if (methodName.startsWith('__')) {
-                                hasMagicMethods = true;
-                                magicMethodsList.push(methodName);
+                            if (methodName === '__wakeup' || methodName === '__destruct') {
+                                const methodId = `method_${className}_${methodName}`;
+                                if (nodeIds.has(methodId)) {
+                                    edges.push({
+                                        source: entryId,
+                                        target: methodId,
+                                        type: 'triggers',
+                                        label: methodName === '__wakeup' ? 'triggers first' : 'triggers on destroy'
+                                    });
+                                }
                             }
                         }
                     }
                 }
-                
-                nodes.push({
-                    id: classId,
-                    label: className,
-                    type: 'class',
-                    metadata: {
-                        line: phpAnalyzer.getNodeLocation(classNode)?.line,
-                        extends: classNode.extends?.name || null,
-                        implements: classNode.implements?.map((i: any) => i.name) || [],
-                        properties: propertyCount,
-                        methods: methodCount,
-                        hasMagicMethods: hasMagicMethods,
-                        magicMethods: magicMethodsList
-                    }
-                });
             }
+        });
 
-            // Add extends relationship
-            if (classNode.extends) {
-                const parentName = classNode.extends.name || 'Unknown';
-                const parentId = `class_${parentName}`;
-                
-                // Add parent class node if not exists
-                if (!nodeIds.has(parentId)) {
-                    nodeIds.add(parentId);
-                    nodes.push({
-                        id: parentId,
-                        label: parentName,
-                        type: 'class'
-                    });
-                }
-
-                edges.push({
-                    source: classId,
-                    target: parentId,
-                    type: 'extends',
-                    label: 'extends'
-                });
+        // 过滤无效边：确保所有边的 source 和 target 都存在于节点中
+        const validEdges = edges.filter(edge => {
+            const sourceExists = nodeIds.has(edge.source);
+            const targetExists = nodeIds.has(edge.target);
+            if (!sourceExists || !targetExists) {
+                console.log(`Filtering invalid edge: ${edge.source} -> ${edge.target} (source exists: ${sourceExists}, target exists: ${targetExists})`);
+                return false;
             }
+            return true;
+        });
 
-            // Add implements relationships
-            if (classNode.implements) {
-                for (const iface of classNode.implements) {
-                    const ifaceName = iface.name || 'Unknown';
-                    const ifaceId = `interface_${ifaceName}`;
-                    
-                    if (!nodeIds.has(ifaceId)) {
-                        nodeIds.add(ifaceId);
-                        nodes.push({
-                            id: ifaceId,
-                            label: ifaceName,
-                            type: 'class'
-                        });
-                    }
-
-                    edges.push({
-                        source: classId,
-                        target: ifaceId,
-                        type: 'implements',
-                        label: 'implements'
-                    });
-                }
-            }
-
-            // 3. Add class properties (NEW!)
-            if (classNode.body) {
-                for (const member of classNode.body) {
-                    if (member.kind === 'propertystatement') {
-                        // Handle property declarations
-                        const properties = member.properties || [];
-                        for (const prop of properties) {
-                            const propName = prop.name?.name || prop.name || 'unknown';
-                            const propId = `prop_${className}_${propName}`;
-                            const visibility = member.visibility || 'public';
-                            
-                            if (!nodeIds.has(propId)) {
-                                nodeIds.add(propId);
-                                nodes.push({
-                                    id: propId,
-                                    label: `$${propName}`,
-                                    type: 'property',
-                                    metadata: {
-                                        className: className,
-                                        visibility: visibility,
-                                        line: phpAnalyzer.getNodeLocation(prop)?.line
-                                    }
-                                });
-                            }
-
-                            edges.push({
-                                source: classId,
-                                target: propId,
-                                type: 'contains',
-                                label: visibility
-                            });
-                        }
-                    }
-                }
-            }
-        }
-
-        // 4. Add method nodes and analyze magic method chains
-        const magicChains = magicAnalyzer.traceChains();
-        
-        for (const classNode of classes) {
-            const className = classNode.name?.name || 'Unknown';
-            const classId = `class_${className}`;
-            
-            if (!classNode.body) {
-                continue;
-            }
-
-            for (const member of classNode.body) {
-                if (member.kind === 'method') {
-                    const methodName = member.name?.name || member.name || 'unknown';
-                    const methodId = `method_${className}_${methodName}`;
-                    const isMagic = this.isMagicMethod(methodName);
-                    
-                    // 提取方法参数
-                    const parameters = (member.arguments || []).map((arg: any) => {
-                        const name = arg.name?.name || arg.name || 'unknown';
-                        const type = arg.type?.name || '';
-                        return type ? `${type} $${name}` : `$${name}`;
-                    });
-                    
-                    // 分析方法体中的危险调用
-                    const dangerousCalls: string[] = [];
-                    const triggers: string[] = [];
-                    
-                    if (member.body?.children) {
-                        this.traverseForDangerousCalls(member.body.children, dangerousCalls, triggers);
-                    }
-                    
-                    if (!nodeIds.has(methodId)) {
-                        nodeIds.add(methodId);
-                        nodes.push({
-                            id: methodId,
-                            label: `${className}::${methodName}`,
-                            type: isMagic ? 'magic' : 'method',
-                            metadata: {
-                                line: phpAnalyzer.getNodeLocation(member)?.line,
-                                isMagic: isMagic,
-                                visibility: member.visibility || 'public',
-                                parameters: parameters,
-                                dangerousCalls: dangerousCalls,
-                                triggers: triggers,
-                                description: isMagic ? this.getMagicMethodDescription(methodName) : ''
-                            }
-                        });
-                    }
-
-                    edges.push({
-                        source: classId,
-                        target: methodId,
-                        type: 'contains'
-                    });
-
-                    // Connect unserialize to __wakeup and __destruct
-                    if ((methodName === '__wakeup' || methodName === '__destruct') && unserializeEntries.length > 0) {
-                        unserializeEntries.forEach((entry, index) => {
-                            const triggerLabel = methodName === '__wakeup' ? 'auto triggers' : 'triggers on destroy';
-                            edges.push({
-                                source: `entry_unserialize_${index}`,
-                                target: methodId,
-                                type: 'triggers',
-                                label: triggerLabel
-                            });
-                        });
-                    }
-
-                    // 5. Analyze method body for property usage and magic method triggers
-                    this.analyzeMethodBody(member, className, methodName, methodId, nodes, edges, nodeIds, phpAnalyzer);
-                }
-            }
-        }
-
-        // 6. Add magic method trigger chains from analyzer
-        for (const chain of magicChains) {
-            const parts = chain.entryPoint.split('::');
-            const entryClassName = parts[0];
-            const entryMethodName = parts[1];
-            const entryNodeId = `method_${entryClassName}_${entryMethodName}`;
-
-            for (const trigger of chain.chain) {
-                if (trigger.methodName.startsWith('__')) {
-                    const triggerId = `trigger_${trigger.className}_${trigger.methodName}_${trigger.line}`;
-                    
-                    if (!nodeIds.has(triggerId)) {
-                        nodeIds.add(triggerId);
-                        nodes.push({
-                            id: triggerId,
-                            label: `→ ${trigger.methodName}`,
-                            type: 'magic',
-                            metadata: {
-                                line: trigger.line,
-                                column: trigger.column,
-                                triggeredBy: trigger.triggeredBy
-                            }
-                        });
-                    }
-
-                    if (nodeIds.has(entryNodeId)) {
-                        edges.push({
-                            source: entryNodeId,
-                            target: triggerId,
-                            type: 'triggers',
-                            label: trigger.triggeredBy
-                        });
-                    }
-                }
-            }
-
-            // Add property flow nodes
-            for (const flow of chain.propertyFlows) {
-                const propId = `flow_${flow.fromClass}_${flow.propertyName}_${flow.line}`;
-                
-                if (!nodeIds.has(propId)) {
-                    nodeIds.add(propId);
-                    nodes.push({
-                        id: propId,
-                        label: `$this->${flow.propertyName}`,
-                        type: 'property',
-                        metadata: {
-                            line: flow.line,
-                            usedAs: flow.usedAs,
-                            toVariable: flow.toVariable
-                        }
-                    });
-                }
-
-                const classNodeId = `class_${flow.fromClass}`;
-                if (nodeIds.has(classNodeId)) {
-                    edges.push({
-                        source: classNodeId,
-                        target: propId,
-                        type: 'dataflow',
-                        label: `→ $${flow.toVariable}`
-                    });
-                }
-
-                if (nodeIds.has(entryNodeId)) {
-                    edges.push({
-                        source: propId,
-                        target: entryNodeId,
-                        type: 'dataflow',
-                        label: `used as ${flow.usedAs}`
-                    });
-                }
-            }
-
-            // Add dangerous sink nodes
-            for (const sink of chain.dangerousSinks) {
-                const sinkId = `sink_${sink}_${chain.entryPoint}`;
-                
-                if (!nodeIds.has(sinkId)) {
-                    nodeIds.add(sinkId);
-                    nodes.push({
-                        id: sinkId,
-                        label: `⚠ ${sink}()`,
-                        type: 'sink',
-                        metadata: {
-                            dangerous: true,
-                            description: '危险函数调用'
-                        }
-                    });
-                }
-
-                if (nodeIds.has(entryNodeId)) {
-                    edges.push({
-                        source: entryNodeId,
-                        target: sinkId,
-                        type: 'calls',
-                        label: 'calls dangerous'
-                    });
-                }
-            }
-        }
-
-        return { nodes, edges };
+        return { nodes, edges: validEdges };
     }
+
+    // ========== 辅助方法 ==========
+    
+    private collectSuperGlobals(ast: any, superGlobals: Map<string, { key: string; line: number }[]>, phpAnalyzer: PHPAnalyzer): void {
+        const superGlobalNames = ['_GET', '_POST', '_COOKIE', '_REQUEST', '_FILES', '_SERVER', '_SESSION'];
+        
+        phpAnalyzer.traverse(ast, (node: any) => {
+            if (node.kind === 'offsetlookup' && node.what?.kind === 'variable') {
+                const varName = node.what.name;
+                if (superGlobalNames.includes(varName)) {
+                    const key = node.offset?.value || node.offset?.name || 'unknown';
+                    const line = phpAnalyzer.getNodeLocation(node)?.line || 0;
+                    
+                    if (!superGlobals.has(varName)) {
+                        superGlobals.set(varName, []);
+                    }
+                    superGlobals.get(varName)!.push({ key, line });
+                }
+            }
+        });
+    }
+
+    private analyzeMethodBodyEnhanced(
+        nodes: any[], 
+        dangerousCalls: string[], 
+        calledMethods: string[], 
+        usedProperties: string[],
+        phpAnalyzer: PHPAnalyzer
+    ): void {
+        const dangerousFunctions = [
+            'eval', 'assert', 'system', 'exec', 'passthru', 'shell_exec',
+            'popen', 'proc_open', 'call_user_func', 'call_user_func_array',
+            'file_get_contents', 'file_put_contents', 'fopen', 'fwrite',
+            'include', 'include_once', 'require', 'require_once',
+            'unserialize', 'preg_replace'
+        ];
+
+        phpAnalyzer.traverse(nodes, (node: any) => {
+            // 检测函数调用
+            if (node.kind === 'call') {
+                const funcName = this.getFunctionNameFromCall(node);
+                if (funcName && dangerousFunctions.includes(funcName.toLowerCase())) {
+                    dangerousCalls.push(funcName);
+                }
+                
+                // 检测方法调用 $this->method()
+                if (node.what?.kind === 'propertylookup' && 
+                    node.what.what?.kind === 'variable' && 
+                    node.what.what.name === 'this') {
+                    const methodName = node.what.offset?.name || '';
+                    if (methodName) {
+                        calledMethods.push(methodName);
+                    }
+                }
+            }
+            
+            // 检测属性使用 $this->property
+            if (node.kind === 'propertylookup' && 
+                node.what?.kind === 'variable' && 
+                node.what.name === 'this') {
+                const propName = node.offset?.name || '';
+                if (propName && !usedProperties.includes(propName)) {
+                    usedProperties.push(propName);
+                }
+            }
+        });
+    }
+
+    private getFunctionNameFromCall(callNode: any): string | null {
+        if (!callNode.what) return null;
+
+        if (typeof callNode.what.name === 'string') {
+            return callNode.what.name;
+        }
+
+        if (callNode.what.kind === 'name') {
+            return callNode.what.name || null;
+        }
+
+        // 方法调用 $obj->method()
+        if (callNode.what.kind === 'propertylookup') {
+            return callNode.what.offset?.name || null;
+        }
+
+        return null;
+    }
+
+    private getVariableName(node: any): string | null {
+        if (!node) return null;
+        if (node.kind === 'variable') {
+            return node.name;
+        }
+        return null;
+    }
+
+    private getSourceFromAssignment(node: any, superGlobals: Map<string, any>): string | null {
+        if (!node) return null;
+
+        if (node.kind === 'offsetlookup' && node.what?.kind === 'variable') {
+            const varName = node.what.name;
+            if (superGlobals.has(varName)) {
+                return varName;
+            }
+        }
+
+        if (node.kind === 'bin') {
+            const left = this.getSourceFromAssignment(node.left, superGlobals);
+            if (left) return left;
+            return this.getSourceFromAssignment(node.right, superGlobals);
+        }
+
+        return null;
+    }
+
+    private traceArgumentSource(node: any, superGlobals: Map<string, any>): string | null {
+        if (!node) return null;
+
+        if (node.kind === 'variable') {
+            // TODO: 通过变量映射追踪
+            return null;
+        }
+
+        if (node.kind === 'offsetlookup' && node.what?.kind === 'variable') {
+            const varName = node.what.name;
+            if (superGlobals.has(varName)) {
+                return varName;
+            }
+        }
+
+        return null;
+    }
+
+    private getDangerousFunctionDescription(funcName: string): string {
+        const descriptions: { [key: string]: string } = {
+            'eval': '执行任意 PHP 代码',
+            'assert': '可执行代码的断言',
+            'system': '执行系统命令',
+            'exec': '执行系统命令',
+            'passthru': '执行系统命令并输出',
+            'shell_exec': '通过 shell 执行命令',
+            'popen': '打开进程文件指针',
+            'proc_open': '执行命令并打开 I/O',
+            'unserialize': '反序列化可能导致对象注入',
+            'include': '文件包含可能导致 RCE',
+            'require': '文件包含可能导致 RCE',
+            'file_get_contents': '读取文件/URL内容',
+            'file_put_contents': '写入文件',
+            'preg_replace': '/e 修饰符可执行代码',
+            'call_user_func': '调用任意函数',
+            'extract': '变量覆盖'
+        };
+        return descriptions[funcName.toLowerCase()] || '危险函数';
+    }
+
+    // ========== 原有的 buildCodeGraph 旧代码已删除 ==========
+    // 使用上面的增强版 buildCodeGraph
 
     /**
      * Analyze method body for property usage and potential magic method triggers

@@ -6,12 +6,84 @@ export class AttackChainAnalyzer {
     private ast: any;
     private analyzer: PHPAnalyzer;
     private maxDepth: number;
+    private taintMap: Map<string, string>; // 变量名 -> 污点来源
 
     constructor(ast: any, maxDepth: number = 5) {
         this.ast = ast;
         this.analyzer = new PHPAnalyzer('');
         this.analyzer['ast'] = ast;
         this.maxDepth = maxDepth;
+        this.taintMap = new Map();
+        this.buildTaintMap();
+    }
+
+    // 构建污点映射，追踪变量来源
+    private buildTaintMap(): void {
+        const assignments = this.analyzer.getAllAssignments();
+        
+        for (const assign of assignments) {
+            const leftName = this.getVariableName(assign.left);
+            if (!leftName) continue;
+
+            const source = this.getSourceFromNode(assign.right);
+            if (source) {
+                this.taintMap.set(leftName, source);
+            }
+        }
+    }
+
+    private getVariableName(node: any): string | null {
+        if (!node) return null;
+        if (node.kind === 'variable') {
+            return node.name;
+        }
+        return null;
+    }
+
+    private getSourceFromNode(node: any): string | null {
+        if (!node) return null;
+
+        switch (node.kind) {
+            case 'offsetlookup':
+                // 检查是否是超全局变量访问
+                if (node.what && node.what.kind === 'variable') {
+                    const name = node.what.name;
+                    if (['_GET', '_POST', '_COOKIE', '_REQUEST', '_FILES', '_SERVER'].includes(name)) {
+                        return '$' + name;
+                    }
+                }
+                // 递归检查
+                return this.getSourceFromNode(node.what);
+            
+            case 'variable':
+                const varName = node.name;
+                // 检查是否是超全局变量
+                if (['_GET', '_POST', '_COOKIE', '_REQUEST', '_FILES', '_SERVER'].includes(varName)) {
+                    return '$' + varName;
+                }
+                // 检查是否已在 taintMap 中
+                if (this.taintMap.has(varName)) {
+                    return this.taintMap.get(varName)!;
+                }
+                return null;
+            
+            case 'call':
+                // file_get_contents 等函数的返回值可能是污点
+                const funcName = this.getFunctionName(node);
+                if (funcName === 'file_get_contents') {
+                    return 'file_get_contents()';
+                }
+                return null;
+            
+            case 'bin':
+                // 二元操作符 (如 ?? 合并运算符)
+                const leftSource = this.getSourceFromNode(node.left);
+                if (leftSource) return leftSource;
+                return this.getSourceFromNode(node.right);
+            
+            default:
+                return null;
+        }
     }
 
     analyzeAttackChains(document: vscode.TextDocument): AnalysisResult[] {
@@ -234,6 +306,12 @@ export class AttackChainAnalyzer {
             return (callNode.what.name || '').toLowerCase();
         }
 
+        // 支持方法调用 $obj->method()
+        if (callNode.what.kind === 'propertylookup') {
+            const methodName = callNode.what.offset?.name || callNode.what.offset || '';
+            return (typeof methodName === 'string' ? methodName : '').toLowerCase();
+        }
+
         return '';
     }
 
@@ -243,6 +321,11 @@ export class AttackChainAnalyzer {
         }
 
         const firstArg = callNode.arguments[0];
+        // 使用新的污点追踪逻辑
+        const taintSource = this.getSourceFromNode(firstArg);
+        if (taintSource) {
+            return taintSource;
+        }
         return this.traceSource(firstArg);
     }
 
@@ -253,11 +336,23 @@ export class AttackChainAnalyzer {
 
         switch (node.kind) {
             case 'variable':
-                return '$' + (node.name || 'unknown');
+                const varName = node.name || 'unknown';
+                // 检查是否是超全局变量
+                if (['_GET', '_POST', '_COOKIE', '_REQUEST', '_FILES', '_SERVER'].includes(varName)) {
+                    return '$' + varName;
+                }
+                // 检查污点映射
+                if (this.taintMap.has(varName)) {
+                    return this.taintMap.get(varName)!;
+                }
+                return '$' + varName;
             
             case 'offsetlookup':
                 if (node.what && node.what.kind === 'variable') {
-                    return '$' + node.what.name;
+                    const name = node.what.name;
+                    if (['_GET', '_POST', '_COOKIE', '_REQUEST', '_FILES', '_SERVER'].includes(name)) {
+                        return '$' + name;
+                    }
                 }
                 return 'array access';
             
@@ -265,13 +360,21 @@ export class AttackChainAnalyzer {
                 const funcName = this.getFunctionName(node);
                 return funcName + '()';
             
+            case 'bin':
+                // 二元操作符
+                const leftSource = this.traceSource(node.left);
+                if (this.isUserControlled(leftSource)) {
+                    return leftSource;
+                }
+                return this.traceSource(node.right);
+            
             default:
                 return node.kind || 'unknown';
         }
     }
 
     private isUserControlled(source: string): boolean {
-        const userInputs = ['$_GET', '$_POST', '$_COOKIE', '$_REQUEST', '$_FILES', 'file_get_contents()'];
+        const userInputs = ['$_GET', '$_POST', '$_COOKIE', '$_REQUEST', '$_FILES', '$_SERVER', 'file_get_contents()'];
         return userInputs.some(input => source.includes(input));
     }
 
