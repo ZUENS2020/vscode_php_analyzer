@@ -1,47 +1,49 @@
 # PHP Security Analyzer
 
-🔒 专为 CTF 竞赛设计的 PHP 安全分析插件，自动检测漏洞、分析 POP 链、生成利用 Payload。
+[中文](README_zh-CN.md) | English
+
+🔒 A PHP security analysis plugin designed for CTF competitions, featuring automatic vulnerability detection, POP chain analysis, and exploit payload generation.
 
 ![VS Code](https://img.shields.io/badge/VS%20Code-^1.80.0-blue)
 ![License](https://img.shields.io/badge/license-MIT-green)
 ![Version](https://img.shields.io/badge/version-1.0.0-orange)
 
-## ✨ 功能特性
+## ✨ Features
 
-### 🔍 漏洞检测
-- **LFI/RFI** - 本地/远程文件包含
-- **SQL 注入** - 包括 intval 绕过检测
-- **XXE** - XML 外部实体注入
-- **命令注入** - system/exec/passthru 等
-- **反序列化** - unserialize 危险调用
-- **SSRF** - 服务端请求伪造
-- **变量覆盖** - extract/parse_str 等
+### 🔍 Vulnerability Detection
+- **LFI/RFI** - Local/Remote File Inclusion
+- **SQL Injection** - Including intval bypass detection
+- **XXE** - XML External Entity Injection
+- **Command Injection** - system/exec/passthru, etc.
+- **Deserialization** - Dangerous unserialize calls
+- **SSRF** - Server-Side Request Forgery
+- **Variable Override** - extract/parse_str, etc.
 
-### ⛓️ POP 链分析
-- 自动识别魔术方法（__destruct, __wakeup, __toString 等）
-- 追踪属性注入点
-- 构建完整攻击链
-- 可视化展示调用关系
+### ⛓️ POP Chain Analysis
+- Automatic magic method detection (__destruct, __wakeup, __toString, etc.)
+- Property injection point tracking
+- Complete attack chain construction
+- Visualized call relationship display
 
-### 📊 代码结构图
-- Maltego 风格的交互式图表
-- 类/方法/属性关系可视化
-- 数据流追踪
-- 危险函数调用高亮
+### 📊 Code Structure Graph
+- Maltego-style interactive charts
+- Class/method/property relationship visualization
+- Data flow tracking
+- Dangerous function call highlighting
 
-### 🎯 Payload 生成
-- 自动生成漏洞利用代码
-- 支持 POP 链序列化 Payload
-- 提供多种绕过技巧
+### 🎯 Payload Generation
+- Automatic vulnerability exploit code generation
+- POP chain serialization payload support
+- Multiple bypass techniques provided
 
-## 📦 安装
+## 📦 Installation
 
-### 从 VSIX 安装
+### Install from VSIX
 ```bash
 code --install-extension php-code-analyzer-ctf-x.x.x.vsix
 ```
 
-### 从源码构建
+### Build from Source
 ```bash
 git clone https://github.com/ZUENS2020/vscode_php_analyzer.git
 cd vscode_php_analyzer
@@ -50,78 +52,78 @@ npm run compile
 npx vsce package
 ```
 
-## 🚀 使用方法
+## 🚀 Usage
 
-1. 打开 PHP 文件
-2. 使用命令面板 (`Ctrl+Shift+P`)：
-   - `PHP Analyzer: Full Security Analysis` - 完整安全分析
-   - `PHP Analyzer: Find POP Chain` - 查找 POP 链
-   - `PHP Analyzer: Scan Vulnerabilities` - 扫描漏洞
-   - `PHP Analyzer: Generate Exploit Payload` - 生成利用代码
-   - `PHP Analyzer: Show Code Graph` - 显示代码结构图
+1. Open a PHP file
+2. Use the Command Palette (`Ctrl+Shift+P`):
+   - `PHP Analyzer: Full Security Analysis` - Complete security analysis
+   - `PHP Analyzer: Find POP Chain` - Find POP chains
+   - `PHP Analyzer: Scan Vulnerabilities` - Scan for vulnerabilities
+   - `PHP Analyzer: Generate Exploit Payload` - Generate exploit code
+   - `PHP Analyzer: Show Code Graph` - Show code structure graph
 
-3. 右键菜单也可快速访问分析功能
+3. Right-click menu also provides quick access to analysis functions
 
-## 📸 截图
+## 📸 Screenshots
 
-### 代码结构图
-交互式图表展示代码结构和攻击路径：
-- 🟢 入口点 (unserialize)
-- 🔵 类
-- 🟢 方法
-- 🔴 魔术方法
-- 🟠 用户输入源
-- 🔴 危险函数
+### Code Structure Graph
+Interactive chart displaying code structure and attack paths:
+- 🟢 Entry points (unserialize)
+- 🔵 Classes
+- 🟢 Methods
+- 🔴 Magic methods
+- 🟠 User input sources
+- 🔴 Dangerous functions
 
-### POP 链检测
-自动发现反序列化攻击链并生成 Payload。
+### POP Chain Detection
+Automatically discovers deserialization attack chains and generates payloads.
 
-## ⚙️ 配置
+## ⚙️ Configuration
 
-在 VS Code 设置中搜索 `phpAnalyzer`：
+Search for `phpAnalyzer` in VS Code settings:
 
-| 设置 | 默认值 | 说明 |
-|------|--------|------|
-| `phpAnalyzer.enableInlineHints` | true | 显示内联提示 |
-| `phpAnalyzer.highlightDangerousPatterns` | true | 高亮危险代码 |
-| `phpAnalyzer.showPOPChains` | true | 显示 POP 链 |
-| `phpAnalyzer.graphServerPort` | 3000 | 图表服务器端口 |
+| Setting | Default | Description |
+|---------|---------|-------------|
+| `phpAnalyzer.enableInlineHints` | true | Show inline hints |
+| `phpAnalyzer.highlightDangerousPatterns` | true | Highlight dangerous code |
+| `phpAnalyzer.showPOPChains` | true | Show POP chains |
+| `phpAnalyzer.graphServerPort` | 3000 | Graph server port |
 
-## 🔧 开发
+## 🔧 Development
 
 ```bash
-# 安装依赖
+# Install dependencies
 npm install
 
-# 编译
+# Compile
 npm run compile
 
-# 监听模式
+# Watch mode
 npm run watch
 
-# 打包
+# Package
 npx vsce package
 ```
 
-按 `F5` 启动调试模式。
+Press `F5` to launch debug mode.
 
-## 📝 更新日志
+## 📝 Changelog
 
 ### v1.0.0
-- 首个正式版本
-- 完整的漏洞检测功能
-- POP 链自动分析
-- Maltego 风格代码结构图
-- Payload 自动生成
+- First official release
+- Complete vulnerability detection features
+- Automatic POP chain analysis
+- Maltego-style code structure graph
+- Automatic payload generation
 
-## 📄 许可证
+## 📄 License
 
 MIT License
 
-## 🤝 贡献
+## 🤝 Contributing
 
-欢迎提交 Issue 和 Pull Request！
+Issues and Pull Requests are welcome!
 
 ---
 
-**⚠️ 免责声明：本工具仅供安全研究和 CTF 学习使用，请勿用于非法用途。**
+**⚠️ Disclaimer: This tool is for security research and CTF learning only. Do not use for illegal purposes.**
