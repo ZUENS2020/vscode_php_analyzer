@@ -1,345 +1,129 @@
-# PHP Code Analyzer for CTF
+# PHP Security Analyzer for CTF
 
-Advanced PHP security analyzer for CTF challenges - detect POP chains, vulnerabilities, and attack vectors.
+🔒 专为 CTF 竞赛设计的 PHP 安全分析插件，自动检测漏洞、分析 POP 链、生成利用 Payload。
 
-## Features
+![VS Code](https://img.shields.io/badge/VS%20Code-^1.80.0-blue)
+![License](https://img.shields.io/badge/license-MIT-green)
 
-### 🔍 Variable Tracking
-- Track variable flow throughout the file
-- Identify definitions, assignments, and references
-- Trace user input to dangerous functions
+## ✨ 功能特性
 
-**Command:** `PHP Analyzer: Track Variable Flow`
+### 🔍 漏洞检测
+- **LFI/RFI** - 本地/远程文件包含
+- **SQL 注入** - 包括 intval 绕过检测
+- **XXE** - XML 外部实体注入
+- **命令注入** - system/exec/passthru 等
+- **反序列化** - unserialize 危险调用
+- **SSRF** - 服务端请求伪造
+- **变量覆盖** - extract/parse_str 等
 
-### 🏗️ Class Analysis
-- Analyze class structure and relationships
-- Identify inheritance and interfaces
-- List properties, methods, and magic methods
-- Mark dangerous operations
+### ⛓️ POP 链分析
+- 自动识别魔术方法（__destruct, __wakeup, __toString 等）
+- 追踪属性注入点
+- 构建完整攻击链
+- 可视化展示调用关系
 
-**Command:** `PHP Analyzer: Analyze Class Relations`
+### 📊 代码结构图
+- Maltego 风格的交互式图表
+- 类/方法/属性关系可视化
+- 数据流追踪
+- 危险函数调用高亮
 
-### 🪄 Magic Method Detection
-- Find all magic methods in PHP classes
-- Identify dangerous operations within magic methods
-- Detect potential gadget classes for POP chains
+### 🎯 Payload 生成
+- 自动生成漏洞利用代码
+- 支持 POP 链序列化 Payload
+- 提供多种绕过技巧
 
-**Magic Methods Detected:**
-- `__construct`, `__destruct`
-- `__wakeup`, `__sleep`
-- `__toString`, `__invoke`
-- `__call`, `__callStatic`
-- `__get`, `__set`
-- And more...
+## 📦 安装
 
-**Command:** `PHP Analyzer: Show Magic Methods`
-
-### 📦 Serialization Analysis
-- Locate all `serialize()` and `unserialize()` calls
-- Analyze parameter sources (user input detection)
-- Check for `allowed_classes` usage
-- Highlight dangerous deserialization points
-
-**Command:** `PHP Analyzer: Find Serialization Points`
-
-### ⛓️ POP Chain Detection
-- Automatically detect Property-Oriented Programming chains
-- Trace from magic methods to dangerous functions
-- Calculate exploitability scores
-- Generate attack path descriptions
-
-**Command:** `PHP Analyzer: Find POP Chain`
-
-### 🎯 Attack Chain Analysis
-- Identify complete attack vectors
-- Detect Phar deserialization opportunities
-- Find user input to dangerous function paths
-- Assess risk levels (Critical/High/Medium/Low)
-
-**Command:** `PHP Analyzer: Analyze Attack Chains`
-
-### 🛡️ Vulnerability Scanner
-- Scan for 20+ vulnerability patterns
-- Categories:
-  - **DESER**: Unsafe deserialization
-  - **TYPE**: Type confusion
-  - **PHAR**: Phar deserialization
-  - **MAGIC**: Magic method abuse
-  - **FUNC**: Dangerous functions
-  - **AUTO**: Autoload exploitation
-
-**Command:** `PHP Analyzer: Scan Vulnerabilities`
-
-### 💣 Exploit Payload Generation
-- Generate PHP exploit code
-- Create serialized payloads
-- Build Phar files
-- Customizable for different attack chains
-
-**Command:** `PHP Analyzer: Generate Exploit Payload`
-
-### 📊 Full Security Analysis
-- One-click comprehensive analysis
-- Progress tracking with status updates
-- Combines all analysis features
-- Automatic code graph generation
-
-**Command:** `PHP Analyzer: Full Security Analysis`
-
-### 🗺️ Interactive Graph Visualization
-- **Browser-based** interactive graph visualization
-- **Code Structure Graph**: Classes, methods, and relationships
-- **Inheritance Graph**: Class hierarchy visualization
-- **Data Flow Graph**: Track data from sources to sinks
-- **Attack Chain Graph**: Visualize attack paths and exploits
-- Interactive zoom, pan, search, and filter
-- Export graphs as PNG images
-- Real-time updates from VS Code
-
-**Features:**
-- Powered by Cytoscape.js for high-performance rendering
-- Bootstrap 5 responsive UI
-- Runs on local Express server (localhost only)
-- Automatic browser launch
-- Search and filter nodes
-- Click to see node details
-
-**Commands:**
-- `PHP Analyzer: Show Code Graph`
-- `PHP Analyzer: Show Inheritance Graph`
-- `PHP Analyzer: Show Data Flow Graph`
-- `PHP Analyzer: Analyze Attack Chains` (includes graph)
-
-**Configuration:**
-```json
-{
-  "phpAnalyzer.graphServerPort": 3000,
-  "phpAnalyzer.showGraphOnAnalysis": true
-}
-```
-
-See [GRAPH_VISUALIZATION.md](GRAPH_VISUALIZATION.md) for detailed documentation.
-
-## Installation
-
-1. Clone this repository
-2. Run `npm install`
-3. Run `npm run compile`
-4. Press F5 to open in Extension Development Host
-
-Or package and install:
+### 从 VSIX 安装
 ```bash
-npm install -g @vscode/vsce
-vsce package
-code --install-extension php-code-analyzer-ctf-0.2.0.vsix
+code --install-extension php-code-analyzer-ctf-x.x.x.vsix
 ```
 
-## Usage
-
-### Quick Start
-
-1. Open a PHP file in VS Code
-2. Click the rocket icon 🚀 in the editor title bar, or
-3. Right-click and select "Full Security Analysis"
-4. View results in the "PHP Security Analyzer" sidebar
-
-### Context Menu
-
-Right-click in a PHP file to access:
-- Track Variable Flow (select a variable first)
-- Analyze Class Relations (select a class name first)
-- Full Security Analysis
-- Analyze Attack Chains
-- Show Code Graph
-
-### Command Palette
-
-Press `Ctrl+Shift+P` (Windows/Linux) or `Cmd+Shift+P` (Mac) and type "PHP Analyzer" to see all commands.
-
-## Configuration
-
-Access settings via `File > Preferences > Settings` and search for "PHP Analyzer":
-
-- **phpAnalyzer.enableInlineHints** (default: `true`)
-  - Show inline hints for variable types and dangerous patterns
-
-- **phpAnalyzer.highlightDangerousPatterns** (default: `true`)
-  - Highlight dangerous code patterns with colored backgrounds
-
-- **phpAnalyzer.showPOPChains** (default: `true`)
-  - Automatically detect and display POP chains
-
-- **phpAnalyzer.autoAnalyzeOnOpen** (default: `false`)
-  - Automatically run vulnerability scan when opening PHP files
-  - Warning: May impact performance on large files
-
-- **phpAnalyzer.maxChainDepth** (default: `5`, range: `1-10`)
-  - Maximum depth for POP chain and attack chain detection
-  - Higher values find more chains but take longer
-
-- **phpAnalyzer.showGraphOnAnalysis** (default: `true`)
-  - Automatically show code graph after running Full Analysis
-
-## CTF Usage Examples
-
-### Example 1: Finding POP Chains
-
-```php
-<?php
-class Logger {
-    private $logfile;
-    
-    public function __destruct() {
-        file_put_contents($this->logfile, "Log entry");
-    }
-}
-
-class User {
-    public $name;
-    
-    public function __toString() {
-        return $this->name;
-    }
-}
+### 从源码构建
+```bash
+git clone https://github.com/ZUENS2020/vscode_php_highlighter.git
+cd vscode_php_highlighter
+npm install
+npm run compile
+npx vsce package
 ```
 
-The analyzer will detect:
-1. `__destruct` with `file_put_contents()` (dangerous operation)
-2. `__toString` that could trigger string context
-3. Potential POP chain if these classes are combined
+## 🚀 使用方法
 
-### Example 2: Unsafe Deserialization
+1. 打开 PHP 文件
+2. 使用命令面板 (`Ctrl+Shift+P`)：
+   - `PHP Analyzer: Full Security Analysis` - 完整安全分析
+   - `PHP Analyzer: Find POP Chain` - 查找 POP 链
+   - `PHP Analyzer: Scan Vulnerabilities` - 扫描漏洞
+   - `PHP Analyzer: Generate Exploit Payload` - 生成利用代码
+   - `PHP Analyzer: Show Code Graph` - 显示代码结构图
 
-```php
-<?php
-$data = $_GET['data'];
-$obj = unserialize(base64_decode($data));
-```
+3. 右键菜单也可快速访问分析功能
 
-The analyzer will flag:
-- Critical vulnerability: User input to `unserialize()`
-- Missing `allowed_classes` restriction
-- Potential for object injection
+## 📸 截图
 
-### Example 3: Phar Deserialization
+### 代码结构图
+交互式图表展示代码结构和攻击路径：
+- 🟢 入口点 (unserialize)
+- 🔵 类
+- 🟢 方法
+- 🔴 魔术方法
+- 🟠 用户输入源
+- 🔴 危险函数
 
-```php
-<?php
-$file = $_GET['file'];
-if (file_exists($file)) {
-    echo "File exists!";
-}
-```
+### POP 链检测
+自动发现反序列化攻击链并生成 Payload。
 
-The analyzer will detect:
-- User-controlled file path
-- `file_exists()` can trigger phar:// deserialization
-- High-risk attack chain
+## ⚙️ 配置
 
-## Vulnerability Patterns
+在 VS Code 设置中搜索 `phpAnalyzer`：
 
-The extension detects these vulnerability patterns:
+| 设置 | 默认值 | 说明 |
+|------|--------|------|
+| `phpAnalyzer.enableInlineHints` | true | 显示内联提示 |
+| `phpAnalyzer.highlightDangerousPatterns` | true | 高亮危险代码 |
+| `phpAnalyzer.showPOPChains` | true | 显示 POP 链 |
+| `phpAnalyzer.graphServerPort` | 3000 | 图表服务器端口 |
 
-| ID | Name | Severity | Description |
-|----|------|----------|-------------|
-| DESER-001 | Unsafe Deserialization | Critical | User input to `unserialize()` |
-| DESER-002 | Missing allowed_classes | High | No class whitelist |
-| FUNC-001 | eval() Usage | Critical | Use of `eval()` |
-| FUNC-003 | Command Execution | Critical | System commands |
-| FUNC-004 | Dangerous Callback | High | User-controlled callbacks |
-| MAGIC-002 | Dangerous __destruct | High | Dangerous ops in destructor |
-| PHAR-001 | Phar Deserialization | High | File functions with user input |
-
-## Development
-
-### Project Structure
-
-```
-vscode_php_highlighter/
-├── src/
-│   ├── analyzers/
-│   │   ├── phpAnalyzer.ts          # Core AST parser
-│   │   ├── variableTracker.ts      # Variable flow analysis
-│   │   ├── classAnalyzer.ts        # Class structure analysis
-│   │   ├── magicMethodDetector.ts  # Magic method detection
-│   │   ├── serializationAnalyzer.ts # Serialization points
-│   │   ├── popChainDetector.ts     # POP chain detection
-│   │   ├── attackChainAnalyzer.ts  # Attack chain analysis
-│   │   └── vulnerabilityScanner.ts # Vulnerability patterns
-│   ├── providers/
-│   │   ├── analysisResultsProvider.ts # Tree view provider
-│   │   └── codeGraphProvider.ts    # Graph visualization
-│   ├── utils/
-│   │   └── payloadGenerator.ts     # Exploit generation
-│   ├── types/
-│   │   └── index.ts                # TypeScript interfaces
-│   └── extension.ts                # Extension entry point
-├── package.json
-├── tsconfig.json
-└── README.md
-```
-
-### Building
+## 🔧 开发
 
 ```bash
-npm run compile      # Compile TypeScript
-npm run watch        # Watch mode for development
-npm run lint         # Run ESLint
+# 安装依赖
+npm install
+
+# 编译
+npm run compile
+
+# 监听模式
+npm run watch
+
+# 打包
+npx vsce package
 ```
 
-### Testing
+按 `F5` 启动调试模式。
 
-The extension uses the `php-parser` library to parse PHP code into an AST (Abstract Syntax Tree), which is then analyzed for security issues.
+## 📝 更新日志
 
-## Requirements
+### v0.3.5
+- 修复依赖打包问题
+- Maltego 风格 UI 优化
+- 改进图表渲染性能
 
-- VS Code 1.80.0 or higher
-- PHP files to analyze
+### v0.3.0
+- 新增完整漏洞检测
+- POP 链分析增强
+- Payload 生成器
 
-## Known Issues
+## 📄 许可证
 
-- AST parser may not handle all PHP syntax variations
-- Complex inheritance chains may not be fully detected
-- False positives possible in vulnerability detection
+MIT License
 
-## Contributing
+## 🤝 贡献
 
-Contributions welcome! Please:
-1. Fork the repository
-2. Create a feature branch
-3. Make your changes
-4. Submit a pull request
-
-## License
-
-MIT License - See LICENSE file for details
-
-## Credits
-
-Created for CTF security analysis and educational purposes.
-
-**Dangerous Functions Detected:**
-- Code execution: `eval`, `assert`, `create_function`
-- Command execution: `system`, `exec`, `passthru`, `shell_exec`
-- Deserialization: `unserialize`, `unserialize`
-- Callbacks: `call_user_func`, `call_user_func_array`
-- File operations: `file_get_contents`, `file_put_contents`
-- Includes: `include`, `require`, `include_once`, `require_once`
-
-## Support
-
-For issues and feature requests, please use the GitHub issue tracker.
-
-## Version History
-
-### 0.2.0 (Current)
-- Full feature implementation
-- 12 analysis commands
-- Interactive code graphs
-- Exploit payload generation
-- 20+ vulnerability patterns
-- Comprehensive documentation
+欢迎提交 Issue 和 Pull Request！
 
 ---
 
-**Note:** This tool is for educational and authorized security testing only. Always obtain proper authorization before testing systems you don't own.
+**⚠️ 免责声明：本工具仅供安全研究和 CTF 学习使用，请勿用于非法用途。**
