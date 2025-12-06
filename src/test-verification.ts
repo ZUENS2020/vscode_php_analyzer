@@ -12,13 +12,13 @@
 import * as vscode from 'vscode';
 import * as path from 'path';
 import * as fs from 'fs';
-import { PHPAnalyzer } from '../src/analyzers/phpAnalyzer';
-import { ClassAnalyzer } from '../src/analyzers/classAnalyzer';
-import { POPChainDetector } from '../src/analyzers/popChainDetector';
-import { VulnerabilityScanner } from '../src/analyzers/vulnerabilityScanner';
-import { MultiFileCoordinationAnalyzer } from '../src/analyzers/multiFileCoordinationAnalyzer';
-import { CodeGraphProvider } from '../src/providers/codeGraphProvider';
-import { AnalysisResultsProvider } from '../src/providers/analysisResultsProvider';
+import { PHPAnalyzer } from './analyzers/phpAnalyzer';
+import { ClassAnalyzer } from './analyzers/classAnalyzer';
+import { POPChainDetector } from './analyzers/popChainDetector';
+import { VulnerabilityScanner } from './analyzers/vulnerabilityScanner';
+import { MultiFileCoordinationAnalyzer } from './analyzers/multiFileCoordinationAnalyzer';
+import { CodeGraphProvider } from './providers/codeGraphProvider';
+import { AnalysisResultsProvider } from './providers/analysisResultsProvider';
 
 interface TestResult {
     name: string;
@@ -33,6 +33,8 @@ class TestRunner {
     private testSamplesPath: string;
 
     constructor() {
+        // When compiled, this file is in out/test-verification.js
+        // So we need to go up one level to root, then to test-samples
         this.testSamplesPath = path.join(__dirname, '..', 'test-samples', 'multi-file-test');
     }
 
@@ -78,7 +80,7 @@ class TestRunner {
             console.log('-'.repeat(80));
 
             // Test importing types
-            const types = require('../src/types');
+            const types = require('./types');
             
             const requiredTypes = [
                 'AnalysisResult',
