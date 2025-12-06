@@ -10,3 +10,4 @@ test-analyzer.js
 test-server.js
 test_dataflow.js
 test_questions.js
+validate.js
