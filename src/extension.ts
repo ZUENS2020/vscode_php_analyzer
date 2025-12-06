@@ -1,4 +1,5 @@
 import * as vscode from 'vscode';
+import * as path from 'path';
 import { PHPAnalyzer } from './analyzers/phpAnalyzer';
 import { VariableTracker } from './analyzers/variableTracker';
 import { ClassAnalyzer } from './analyzers/classAnalyzer';
@@ -585,8 +586,7 @@ async function analyzeMultipleFiles(provider: AnalysisResultsProvider, graphProv
 }
 
 function getFileName(filePath: string): string {
-    const parts = filePath.split('\\').pop()?.split('/').pop() || filePath;
-    return parts;
+    return path.basename(filePath);
 }
 
 async function fullSecurityAnalysis(provider: AnalysisResultsProvider, graphProvider: CodeGraphProvider) {
