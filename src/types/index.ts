@@ -310,3 +310,99 @@ export interface ConditionalBranch {
     nodes: PathNode[];
     isTainted: boolean;
 }
+
+// ============================================================================
+// Multi-File Coordination Analysis Types
+// ============================================================================
+
+/**
+ * 代表单个PHP文件的分析信息
+ */
+export interface PhpFileInfo {
+    path: string;
+    uri: vscode.Uri;
+    content: string;
+    ast: any;
+    classes: ClassInfo[];
+    functions: FunctionInfo[];
+    interfaces: InterfaceInfo[];
+    namespaces: string[];
+    imports: ImportStatement[];
+    analysisDuration: number;
+}
+
+/**
+ * 函数信息
+ */
+export interface FunctionInfo {
+    name: string;
+    namespace?: string;
+    parameters: ParameterInfo[];
+    returnType?: string;
+    visibility?: 'public' | 'protected' | 'private';
+    isStatic?: boolean;
+    location: vscode.Location;
+}
+
+/**
+ * 接口信息
+ */
+export interface InterfaceInfo {
+    name: string;
+    namespace?: string;
+    extends?: string[];
+    methods: MethodInfo[];
+    location: vscode.Location;
+}
+
+/**
+ * 导入语句
+ */
+export interface ImportStatement {
+    type: 'use' | 'require' | 'include' | 'require_once' | 'include_once';
+    path: string;
+    namespace?: string;
+    alias?: string;
+    location: vscode.Location;
+}
+
+/**
+ * 多文件协同关系
+ */
+export interface FileCoordinationRelation {
+    source: string;
+    target: string;
+    type: 'imports' | 'extends' | 'implements' | 'calls' | 'includes' | 'references';
+    items: CoordinationItem[];
+    severity?: 'critical' | 'high' | 'medium' | 'low';
+}
+
+/**
+ * 协同项（类、函数、接口等）
+ */
+export interface CoordinationItem {
+    sourceIdentifier: string;
+    targetIdentifier: string;
+    itemType: 'class' | 'function' | 'interface' | 'trait' | 'constant';
+    operation: string;
+    location: vscode.Location;
+    riskLevel?: 'critical' | 'high' | 'medium' | 'low';
+    vulnerabilities?: string[];
+}
+
+/**
+ * 多文件分析结果
+ */
+export interface MultiFileAnalysisResult {
+    projectPath: string;
+    files: PhpFileInfo[];
+    relations: FileCoordinationRelation[];
+    globalVulnerabilities: Vulnerability[];
+    popChains: POPChain[];
+    dataFlowPaths: DataFlowPath[];
+    dependencyGraph: GraphNode[];
+    dependencyEdges: GraphEdge[];
+    analysisTime: number;
+    fileCount: number;
+    relationCount: number;
+}

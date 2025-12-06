@@ -47,6 +47,10 @@
       {
         "command": "phpAnalyzer.showCodeGraph",
         "title": "PHP Analyzer: Show Code Graph"
+      },
+      {
+        "command": "phpAnalyzer.analyzeMultipleFiles",
+        "title": "PHP Analyzer: Analyze Multiple Files"
       }
     ],
     "menus": {
