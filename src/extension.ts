@@ -1,4 +1,5 @@
 import * as vscode from 'vscode';
+import * as path from 'path';
 import { PHPAnalyzer } from './analyzers/phpAnalyzer';
 import { VariableTracker } from './analyzers/variableTracker';
 import { ClassAnalyzer } from './analyzers/classAnalyzer';
@@ -7,6 +8,7 @@ import { SerializationAnalyzer } from './analyzers/serializationAnalyzer';
 import { POPChainDetector, POPChainResult, ChainStep } from './analyzers/popChainDetector';
 import { AttackChainAnalyzer } from './analyzers/attackChainAnalyzer';
 import { VulnerabilityScanner } from './analyzers/vulnerabilityScanner';
+import { MultiFileCoordinationAnalyzer } from './analyzers/multiFileCoordinationAnalyzer';
 import { AnalysisResultsProvider } from './providers/analysisResultsProvider';
 import { CodeGraphProvider } from './providers/codeGraphProvider';
 import { PayloadGenerator } from './utils/payloadGenerator';
@@ -70,6 +72,12 @@ export function activate(context: vscode.ExtensionContext) {
     context.subscriptions.push(
         vscode.commands.registerCommand('phpAnalyzer.showCodeGraph', async () => {
             await showCodeGraph(codeGraphProvider);
+        })
+    );
+
+    context.subscriptions.push(
+        vscode.commands.registerCommand('phpAnalyzer.analyzeMultipleFiles', async () => {
+            await analyzeMultipleFiles(analysisResultsProvider, codeGraphProvider);
         })
     );
 
@@ -447,6 +455,138 @@ function buildAttackChainFromPOP(chains: POPChainResult[], document: vscode.Text
     }
     
     return { nodes, edges };
+}
+
+async function analyzeMultipleFiles(provider: AnalysisResultsProvider, graphProvider: CodeGraphProvider) {
+    try {
+        // 让用户选择要分析的文件夹
+        const folderUri = await vscode.window.showOpenDialog({
+            canSelectFolders: true,
+            canSelectFiles: false,
+            canSelectMany: false,
+            title: '选择要分析的 PHP 项目文件夹'
+        });
+
+        if (!folderUri || folderUri.length === 0) {
+            return;
+        }
+
+        const folderPath = folderUri[0].fsPath;
+
+        // 显示进度提示
+        await vscode.window.withProgress({
+            location: vscode.ProgressLocation.Notification,
+            title: '正在分析多个 PHP 文件...',
+            cancellable: false
+        }, async (progress) => {
+            try {
+                // 创建分析器实例
+                const analyzer = new MultiFileCoordinationAnalyzer(folderPath);
+
+                // 执行分析
+                const result = await analyzer.analyzeFolder(folderPath, (current: number, total: number, message: string) => {
+                    const percentage = Math.round((current / total) * 100);
+                    progress.report({
+                        increment: (100 / total),
+                        message: `${message} (${current}/${total})`
+                    });
+                });
+
+                // 清空之前的结果
+                provider.clearResults();
+
+                // 转换结果为树形结构
+                const treeItems: any[] = [];
+
+                // 文件统计
+                treeItems.push({
+                    label: `📊 分析统计`,
+                    description: `${result.fileCount} 个文件，${result.relationCount} 个关系`,
+                    collapsibleState: vscode.TreeItemCollapsibleState.Expanded,
+                    children: [
+                        { label: `文件总数: ${result.fileCount}`, collapsibleState: vscode.TreeItemCollapsibleState.None },
+                        { label: `协同关系: ${result.relationCount}`, collapsibleState: vscode.TreeItemCollapsibleState.None },
+                        { label: `分析耗时: ${result.analysisTime}ms`, collapsibleState: vscode.TreeItemCollapsibleState.None },
+                        { label: `全局漏洞: ${result.globalVulnerabilities.length}`, collapsibleState: vscode.TreeItemCollapsibleState.None },
+                        { label: `跨文件 POP 链: ${result.popChains.length}`, collapsibleState: vscode.TreeItemCollapsibleState.None }
+                    ]
+                });
+
+                // 文件关系
+                if (result.relations.length > 0) {
+                    const relationItems = result.relations.map((rel: any) => ({
+                        label: `${getFileName(rel.source)} → ${getFileName(rel.target)}`,
+                        description: `[${rel.type}]${rel.severity ? ` 风险: ${rel.severity}` : ''}`,
+                        collapsibleState: rel.items.length > 0 ? vscode.TreeItemCollapsibleState.Collapsed : vscode.TreeItemCollapsibleState.None,
+                        children: rel.items.map((item: any) => ({
+                            label: `${item.sourceIdentifier} ${item.operation} ${item.targetIdentifier}`,
+                            description: `[${item.itemType}]${item.riskLevel ? ` 风险: ${item.riskLevel}` : ''}`,
+                            collapsibleState: vscode.TreeItemCollapsibleState.None
+                        }))
+                    }));
+
+                    treeItems.push({
+                        label: `🔗 文件协同关系 (${relationItems.length})`,
+                        collapsibleState: vscode.TreeItemCollapsibleState.Expanded,
+                        children: relationItems
+                    });
+                }
+
+                // 全局漏洞
+                if (result.globalVulnerabilities.length > 0) {
+                    const vulnItems = result.globalVulnerabilities.map((vuln: any) => ({
+                        label: vuln.name,
+                        description: `[${vuln.severity}] ${vuln.id}`,
+                        collapsibleState: vscode.TreeItemCollapsibleState.None
+                    }));
+
+                    treeItems.push({
+                        label: `⚠️ 全局漏洞 (${vulnItems.length})`,
+                        collapsibleState: vscode.TreeItemCollapsibleState.Expanded,
+                        children: vulnItems
+                    });
+                }
+
+                // 跨文件 POP 链
+                if (result.popChains.length > 0) {
+                    const popItems = result.popChains.map((chain: any, idx: number) => ({
+                        label: `${chain.entryPoint} → ${chain.sink}`,
+                        description: `风险等级: ${Math.round(chain.exploitability * 100)}%`,
+                        collapsibleState: chain.steps.length > 0 ? vscode.TreeItemCollapsibleState.Collapsed : vscode.TreeItemCollapsibleState.None,
+                        children: chain.steps.map((step: any) => ({
+                            label: `${step.className}::${step.methodName}`,
+                            description: step.operation,
+                            collapsibleState: vscode.TreeItemCollapsibleState.None
+                        }))
+                    }));
+
+                    treeItems.push({
+                        label: `🔓 跨文件 POP 链 (${popItems.length})`,
+                        collapsibleState: vscode.TreeItemCollapsibleState.Expanded,
+                        children: popItems
+                    });
+                }
+
+                // 更新提供者结果
+                provider.updateResults('多文件分析', treeItems);
+
+                // 完成提示
+                const action = await vscode.window.showInformationMessage(
+                    `✅ 分析完成！找到 ${result.relations.length} 个协同关系`,
+                    '关闭'
+                );
+            } catch (error: any) {
+                vscode.window.showErrorMessage(`多文件分析失败: ${error.message}`);
+                console.error('Multi-file analysis error:', error);
+            }
+        });
+    } catch (error: any) {
+        vscode.window.showErrorMessage(`打开文件夹失败: ${error.message}`);
+    }
+}
+
+function getFileName(filePath: string): string {
+    return path.basename(filePath);
 }
 
 async function fullSecurityAnalysis(provider: AnalysisResultsProvider, graphProvider: CodeGraphProvider) {
